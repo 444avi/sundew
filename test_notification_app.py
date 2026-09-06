@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from unittest import mock
 
 import sentinel
+import settings_server
 import vavi
 from notification_app import (
     AppStore,
@@ -307,6 +308,91 @@ class NotificationAppTests(unittest.TestCase):
                 "SELECT COUNT(*) FROM deliveries WHERE event_id=?", (event["id"],)).fetchone()[0], 2)
         finally:
             monitor_store.conn.close()
+
+
+class PerRecipientScopingTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.store = AppStore(os.path.join(self.temp.name, "scope.db"))
+        self.store.seed_from_env({"EMAIL_TO": "aa@example.com,bb@example.com"})
+
+    def tearDown(self):
+        self.store.close()
+        self.temp.cleanup()
+
+    def test_updates_are_scoped_to_the_named_recipient(self):
+        self.store.update_preference("vavi", {"delivery_mode": "digest"}, email="aa@example.com")
+        aa = self.store.get_settings("aa@example.com")["preferences"]["vavi"]
+        bb = self.store.get_settings("bb@example.com")["preferences"]["vavi"]
+        self.assertEqual(aa["delivery_mode"], "digest")
+        self.assertEqual(bb["delivery_mode"], "immediate")
+
+    def test_email_lookup_is_case_insensitive(self):
+        settings = self.store.get_settings("AA@Example.com")
+        self.assertEqual(settings["user"]["email"], "aa@example.com")
+
+    def test_unknown_recipient_has_no_settings_and_cannot_write(self):
+        self.assertIsNone(self.store.get_settings("nobody@example.com"))
+        self.assertIsNone(self.store.get_user("nobody@example.com"))
+        with self.assertRaises(ValidationError):
+            self.store.update_preference("vavi", {"delivery_mode": "digest"},
+                                         email="nobody@example.com")
+
+    def test_unsubscribe_only_affects_the_named_recipient(self):
+        self.store.unsubscribe(email="aa@example.com")
+        self.assertEqual(self.store.get_settings("aa@example.com")["user"]["status"],
+                         "unsubscribed")
+        self.assertEqual(self.store.get_settings("bb@example.com")["user"]["status"],
+                         "active")
+
+    def test_list_users_returns_every_recipient(self):
+        self.assertEqual(self.store.list_users(),
+                         [{"email": "aa@example.com", "status": "active"},
+                          {"email": "bb@example.com", "status": "active"}])
+
+    def test_send_test_email_uses_the_real_mailer_path(self):
+        worker = DeliveryWorker(self.store, {
+            "EMAIL_FROM": "sender@example.com", "SMTP_PASSWORD": "unused"})
+        captured = {}
+        worker._send = lambda to, subject, body, message_id: captured.update(
+            to=to, subject=subject, body=body, message_id=message_id)
+        result = worker.send_test("aa@example.com", "vavi")
+        self.assertEqual(result, {"status": "sent", "to": "aa@example.com", "monitor": "vavi"})
+        self.assertEqual(captured["to"], "aa@example.com")
+        self.assertTrue(captured["subject"].startswith("[TEST]"))
+        self.assertIn("test email", captured["body"].lower())
+        with self.assertRaises(ValidationError):
+            worker.send_test("aa@example.com", "not-a-monitor")
+
+
+class AuthorizationPolicyTests(unittest.TestCase):
+    ADMINS = {"avi@arboretuminvestments.net"}
+
+    def test_caller_may_always_act_on_self(self):
+        target, error = settings_server.resolve_target(
+            "bob@example.com", "bob@example.com", self.ADMINS)
+        self.assertEqual((target, error), ("bob@example.com", None))
+
+    def test_missing_target_defaults_to_self(self):
+        target, error = settings_server.resolve_target(
+            "bob@example.com", None, self.ADMINS)
+        self.assertEqual((target, error), ("bob@example.com", None))
+
+    def test_admin_may_act_on_another_recipient(self):
+        target, error = settings_server.resolve_target(
+            "avi@arboretuminvestments.net", "bob@example.com", self.ADMINS)
+        self.assertEqual((target, error), ("bob@example.com", None))
+
+    def test_non_admin_cannot_act_on_another_recipient(self):
+        target, error = settings_server.resolve_target(
+            "bob@example.com", "carol@example.com", self.ADMINS)
+        self.assertIsNone(target)
+        self.assertEqual(error[0], 403)
+
+    def test_unauthenticated_request_is_rejected(self):
+        target, error = settings_server.resolve_target(None, None, self.ADMINS)
+        self.assertIsNone(target)
+        self.assertEqual(error[0], 401)
 
 
 if __name__ == "__main__":

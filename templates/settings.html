@@ -57,6 +57,20 @@
       </div>
     </section>
 
+    <section class="admin-bar is-hidden" id="admin-bar" aria-label="Administrator controls">
+      <div class="admin-bar-main">
+        <span class="dark-label">Administrator · viewing recipient</span>
+        <select id="user-switcher" aria-label="Select the recipient to manage"></select>
+      </div>
+      <p class="admin-hint">Signed in as <strong id="admin-identity"></strong>. Saved changes and test emails apply to the selected recipient.</p>
+    </section>
+
+    <section class="notice-panel is-hidden" id="not-recipient" aria-live="polite">
+      <p class="section-index">Access</p>
+      <h2>You’re signed in, but not on the recipient list.</h2>
+      <p id="not-recipient-detail">Ask an administrator to add your address to Vavi or Sentinel delivery.</p>
+    </section>
+
     <div class="monitor-grid" id="settings-root" aria-live="polite">
       <article class="monitor-card vavi-card" data-monitor="vavi">
         <header class="card-header">
@@ -138,6 +152,7 @@
           </section>
 
           <div class="form-footer">
+            <button type="button" class="ghost-button test-email-button">Send test email</button>
             <span class="save-status" role="status"></span>
             <button type="submit" class="primary-button">Save Vavi <span>→</span></button>
           </div>
@@ -238,6 +253,7 @@
           </section>
 
           <div class="form-footer">
+            <button type="button" class="ghost-button test-email-button">Send test email</button>
             <span class="save-status" role="status"></span>
             <button type="submit" class="primary-button">Save Sentinel <span>→</span></button>
           </div>

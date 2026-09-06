@@ -363,8 +363,33 @@ class AppStore:
             pref.pop("kalshi_enabled", None)
         return pref
 
-    def get_settings(self):
-        user = self.conn.execute("SELECT * FROM users ORDER BY id LIMIT 1").fetchone()
+    def _resolve_user(self, email=None):
+        """Resolve the acting user row.
+
+        A concrete ``email`` scopes to that recipient (the production path, where
+        the HTTP layer supplies the authenticated identity). ``None`` falls back
+        to the first seeded user, which keeps single-user callers and tests
+        working; authorization is enforced at the request boundary, not here.
+        """
+        if email:
+            return self.conn.execute(
+                "SELECT * FROM users WHERE email=? COLLATE NOCASE",
+                (normalize_email(email),)).fetchone()
+        return self.conn.execute(
+            "SELECT * FROM users ORDER BY id LIMIT 1").fetchone()
+
+    def get_user(self, email):
+        return self.conn.execute(
+            "SELECT * FROM users WHERE email=? COLLATE NOCASE",
+            (normalize_email(email),)).fetchone()
+
+    def list_users(self):
+        return [{"email": row["email"], "status": row["status"]}
+                for row in self.conn.execute(
+                    "SELECT email, status FROM users ORDER BY email")]
+
+    def get_settings(self, email=None):
+        user = self._resolve_user(email)
         if user is None:
             return None
         preferences = {}
@@ -379,7 +404,7 @@ class AppStore:
             "preferences": preferences,
         }
 
-    def update_preference(self, monitor, payload):
+    def update_preference(self, monitor, payload, email=None):
         if monitor not in MONITORS:
             raise ValidationError({"monitor": "Unknown monitor."})
         if not isinstance(payload, dict):
@@ -393,7 +418,7 @@ class AppStore:
         errors = {}
         for field in sorted(set(payload) - applicable):
             errors[field] = f"{field} does not apply to {monitor.title()}."
-        user = self.conn.execute("SELECT * FROM users ORDER BY id LIMIT 1").fetchone()
+        user = self._resolve_user(email)
         if user is None:
             errors["user"] = "No migrated user is available."
         if errors:
@@ -484,8 +509,8 @@ class AppStore:
             "SELECT * FROM notification_preferences WHERE id=?", (row["id"],)).fetchone()
         return self._preference_dict(saved)
 
-    def unsubscribe(self):
-        user = self.conn.execute("SELECT id FROM users ORDER BY id LIMIT 1").fetchone()
+    def unsubscribe(self, email=None):
+        user = self._resolve_user(email)
         if user is None:
             raise ValidationError({"user": "No migrated user is available."})
         now = iso_utc()
@@ -819,6 +844,28 @@ class DeliveryWorker:
             smtp.starttls()
             smtp.login(user, self.env["SMTP_PASSWORD"])
             smtp.send_message(msg)
+
+    def send_test(self, to, monitor):
+        """Send a representative test email to ``to`` for one monitor.
+
+        Uses the same SMTP path as real delivery so a success genuinely proves
+        the channel works. The body is the static sample, clearly labeled, and
+        the Message-ID is unique per send so it is never treated as a duplicate.
+        """
+        preview = static_preview(monitor)
+        subject = "[TEST] " + preview["subject"]
+        body = "\n".join([
+            preview["eyebrow"], "",
+            preview["headline"], "",
+            preview["summary"], "",
+            " · ".join(preview["meta"]), "",
+            "This is a test email you triggered from the Notification Desk. "
+            "No real event occurred and no delivery preferences were changed.",
+        ])
+        digest = hashlib.sha256(to.encode()).hexdigest()[:12]
+        message_id = f"<test-{monitor}-{digest}-{int(utcnow().timestamp())}@notifications.vavi>"
+        self._send(to, subject, body, message_id)
+        return {"status": "sent", "to": to, "monitor": monitor}
 
     def _kalshi_value(self, row):
         if row["monitor"] != "vavi" or not row["kalshi_enabled"]:

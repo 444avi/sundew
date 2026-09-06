@@ -21,6 +21,17 @@ const timezone = document.querySelector("#timezone");
 const toast = document.querySelector("#toast");
 let toastTimer;
 
+// The recipient currently being edited. Equals your own address for a regular
+// user; an admin can point it at any recipient via the switcher. Every mutating
+// request carries it so the server scopes the write to the same recipient.
+let viewing = null;
+let isAdmin = false;
+
+function withUser(path) {
+  if (!viewing) return path;
+  return `${path}${path.includes("?") ? "&" : "?"}user=${encodeURIComponent(viewing)}`;
+}
+
 function showToast(message, error = false) {
   toast.textContent = message;
   toast.className = `toast show${error ? " error" : ""}`;
@@ -61,6 +72,7 @@ document.querySelectorAll(".monitor-card").forEach(card => {
   card.querySelector('[name="minimum_market_cap_index"]')?.addEventListener(
     "input", () => updateMarketCapLabel(card));
   card.querySelector("form").addEventListener("submit", event => saveMonitor(event, card));
+  card.querySelector(".test-email-button").addEventListener("click", () => sendTestEmail(card));
 });
 
 function setChecks(card, name, values) {
@@ -157,7 +169,7 @@ async function saveMonitor(event, card) {
   button.disabled = true;
   status.textContent = "Saving…";
   try {
-    const response = await fetch(`/api/settings/${card.dataset.monitor}`, {
+    const response = await fetch(withUser(`/api/settings/${card.dataset.monitor}`), {
       method: "PUT",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify(payloadFor(card)),
@@ -178,16 +190,62 @@ async function saveMonitor(event, card) {
   }
 }
 
-async function loadSettings() {
+function renderAdmin(data) {
+  const bar = document.querySelector("#admin-bar");
+  if (!data.is_admin) { bar.classList.add("is-hidden"); return; }
+  document.querySelector("#admin-identity").textContent = data.identity || "";
+  const switcher = document.querySelector("#user-switcher");
+  switcher.innerHTML = (data.users || []).map(user =>
+    `<option value="${user.email}">${user.email}${user.status !== "active" ? ` · ${user.status}` : ""}</option>`
+  ).join("");
+  const current = data.viewing || (data.user && data.user.email) || "";
+  if (current) switcher.value = current;
+  bar.classList.remove("is-hidden");
+}
+
+function showAccessNotice(data) {
+  const notice = document.querySelector("#not-recipient");
+  const grid = document.querySelector("#settings-root");
+  const subscription = document.querySelector("#subscription");
+  if (!data) {  // recipient resolved — restore the normal panels
+    notice.classList.add("is-hidden");
+    grid.classList.remove("is-hidden");
+    subscription.classList.remove("is-hidden");
+    return;
+  }
+  if (data.message) document.querySelector("#not-recipient-detail").textContent = data.message;
+  notice.classList.remove("is-hidden");
+  grid.classList.add("is-hidden");
+  subscription.classList.add("is-hidden");
+}
+
+async function loadSettings(userEmail) {
   document.body.classList.add("loading");
   try {
-    const response = await fetch("/api/settings", {headers: {"Accept": "application/json"}});
+    const response = await fetch(
+      userEmail ? `/api/settings?user=${encodeURIComponent(userEmail)}` : "/api/settings",
+      {headers: {"Accept": "application/json"}});
     const data = await response.json();
     if (!response.ok) throw new Error(data.message || "Could not load settings.");
+    isAdmin = !!data.is_admin;
+    renderAdmin(data);
+    if (!data.user) {  // authenticated, but no recipient row to edit
+      viewing = null;
+      document.querySelector("#user-email").textContent = data.identity || "—";
+      showAccessNotice(data);
+      return;
+    }
+    showAccessNotice(null);
+    viewing = data.viewing || data.user.email;
     document.querySelector("#user-email").textContent = data.user.email;
     timezone.value = data.user.timezone;
     document.querySelector("#subscription-status").textContent = titled(data.user.status);
-    Object.entries(data.preferences).forEach(([monitor, pref]) => renderPreference(monitor, pref));
+    // Only show monitors this recipient is actually seeded for.
+    document.querySelectorAll(".monitor-card").forEach(card => {
+      const pref = data.preferences[card.dataset.monitor];
+      card.classList.toggle("is-hidden", !pref);
+      if (pref) renderPreference(card.dataset.monitor, pref);
+    });
     if (data.user.status !== "active") {
       showToast("This address is unsubscribed. Monitor preferences remain saved.", true);
     }
@@ -198,11 +256,38 @@ async function loadSettings() {
   }
 }
 
+async function sendTestEmail(card) {
+  const monitor = card.dataset.monitor;
+  const button = card.querySelector(".test-email-button");
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = "Sending…";
+  try {
+    const response = await fetch("/api/settings/test-email", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({monitor, user: viewing}),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.message || "Could not send test email.");
+    showToast(`Test ${titled(monitor)} email sent to ${data.to}.`);
+  } catch (error) {
+    showToast(error.message, true);
+  } finally {
+    button.disabled = false;
+    button.textContent = original;
+  }
+}
+
+document.querySelector("#user-switcher").addEventListener("change", event => {
+  loadSettings(event.target.value);
+});
+
 document.querySelector("#unsubscribe").addEventListener("click", async () => {
   const email = document.querySelector("#user-email").textContent;
   if (!window.confirm(`Disable all future notification delivery to ${email}?`)) return;
   try {
-    const response = await fetch("/api/unsubscribe", {
+    const response = await fetch(withUser("/api/unsubscribe"), {
       method: "POST",
       headers: {"Content-Type": "application/json"},
       body: "{}",

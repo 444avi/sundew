@@ -188,6 +188,22 @@ footer { display: flex; justify-content: space-between; padding: 18px 0 25px; bo
 .toast.error { background: var(--danger); }
 .loading .monitor-card { opacity: .55; pointer-events: none; }
 
+.admin-bar { margin: 0 0 22px; padding: 18px 28px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 26px; background: var(--navy-soft); color: white; }
+.admin-bar-main { display: flex; align-items: center; gap: 12px; }
+.admin-bar .dark-label { margin: 0; }
+#user-switcher { min-width: 260px; height: 38px; padding: 0 12px; border: 1px solid rgba(255,255,255,.22); border-radius: 2px; background: var(--navy); color: white; font: 12px var(--mono); }
+.admin-hint { margin: 0; color: rgba(255,255,255,.6); font: 9px var(--mono); text-transform: uppercase; letter-spacing: .6px; }
+.admin-hint strong { color: var(--acid); }
+
+.notice-panel { margin: 0 0 55px; padding: 40px 30px; border: 1px solid var(--line); background: white; }
+.notice-panel h2 { margin: 10px 0 8px; font-size: 26px; letter-spacing: -.03em; }
+.notice-panel p:last-child { max-width: 640px; margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+
+.test-email-button { margin-right: auto; }
+.ghost-button { height: 44px; padding: 0 16px; border: 1px solid var(--line); border-radius: 2px; background: transparent; color: var(--ink); font: 9px var(--mono); text-transform: uppercase; letter-spacing: .6px; cursor: pointer; }
+.ghost-button:hover { border-color: var(--ink); }
+.ghost-button:disabled { opacity: .55; cursor: wait; }
+
 @media (max-width: 1050px) {
   .monitor-grid { grid-template-columns: 1fr; }
   .account-bar { grid-template-columns: 28px 1fr 1fr; }
