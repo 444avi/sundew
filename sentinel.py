@@ -19,7 +19,6 @@ CLI mirrors vavi.py: forever-loop by default, --once (idempotent, cron-safe),
 import argparse
 import json
 import os
-import smtplib
 import sqlite3
 import sys
 import time
@@ -31,6 +30,7 @@ from email.message import EmailMessage
 import sentinel_cluster as clu
 import sentinel_config as cfg
 import sentinel_sources as src
+import sesmail
 import vavi  # reuse load_env + .env conventions
 from notification_app import (AppStore, DeliveryWorker, sentinel_categories,
                               sentinel_significance)
@@ -549,13 +549,7 @@ def send_email(subject, body_text, env, to=None):
     msg["From"] = env["EMAIL_FROM"]
     msg["To"] = to or env["EMAIL_TO"]
     msg.set_content(body_text)
-    host = env.get("SMTP_HOST", "smtp.gmail.com")
-    port = int(env.get("SMTP_PORT", "587"))
-    user = env.get("SMTP_USER", env["EMAIL_FROM"])
-    with smtplib.SMTP(host, port, timeout=cfg.HTTP_TIMEOUT_SECONDS) as s:
-        s.starttls()
-        s.login(user, env["SMTP_PASSWORD"])
-        s.send_message(msg)
+    sesmail.send(env, msg)
 
 
 def _publish_delivery_event(app_store, c, members, action, triage, env,
@@ -926,7 +920,7 @@ def main(argv=None):
         log("ERROR: ANTHROPIC_API_KEY missing (or pass --no-llm)")
         sys.exit(2)
     if not args.no_email:
-        missing = [k for k in ("EMAIL_FROM", "SMTP_PASSWORD")
+        missing = [k for k in ("EMAIL_FROM",)
                    if not env.get(k)]
         if missing:
             log(f"ERROR: missing {', '.join(missing)} (or pass --no-email)")

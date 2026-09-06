@@ -20,7 +20,6 @@ import hashlib
 import html
 import json
 import os
-import smtplib
 import sqlite3
 import sys
 import time
@@ -31,6 +30,7 @@ from email.message import EmailMessage
 
 import config
 import kalshi
+import sesmail
 from notification_app import AppStore, vavi_categories
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -426,15 +426,7 @@ def send_email(post, c, env, to=None, extra_section=""):
     msg["From"] = env["EMAIL_FROM"]
     msg["To"] = to or vavi_recipient(env)
     msg.set_content(email_body(post, c, extra_section))
-
-    host = env.get("SMTP_HOST", "smtp.gmail.com")
-    port = int(env.get("SMTP_PORT", "587"))
-    user = env.get("SMTP_USER", env["EMAIL_FROM"])
-    pw = env["SMTP_PASSWORD"]
-    with smtplib.SMTP(host, port, timeout=config.HTTP_TIMEOUT_SECONDS) as s:
-        s.starttls()
-        s.login(user, pw)
-        s.send_message(msg)
+    sesmail.send(env, msg)
 
 
 # ---------------------------------------------------------------------------
@@ -625,8 +617,8 @@ def main(argv=None):
     if not args.no_email:
         require_env(
             env,
-            ["EMAIL_FROM", "SMTP_PASSWORD"],
-            "SMTP / email config (or pass --no-email)",
+            ["EMAIL_FROM"],
+            "email config: EMAIL_FROM (or pass --no-email)",
         )
         if args.legacy_delivery and not vavi_recipient(env):
             log("ERROR: legacy delivery requires EMAIL_TO_VAVI or EMAIL_TO")

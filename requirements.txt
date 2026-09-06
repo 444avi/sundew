@@ -1,0 +1,5 @@
+# vavi runtime dependencies.
+# The monitors are otherwise standard-library only; boto3 is needed for email
+# delivery through Amazon SES (see sesmail.py). On the EC2 host install with:
+#   pip install -r requirements.txt
+boto3>=1.34

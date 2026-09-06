@@ -35,7 +35,7 @@ def main(argv=None):
 
     vavi.load_env(args.env)
     env = dict(os.environ)
-    missing = [key for key in ("EMAIL_FROM", "SMTP_PASSWORD") if not env.get(key)]
+    missing = [key for key in ("EMAIL_FROM",) if not env.get(key)]
     if missing:
         log(f"ERROR: missing {', '.join(missing)}")
         return 2

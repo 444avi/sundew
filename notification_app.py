@@ -10,11 +10,12 @@ LLM.
 import hashlib
 import json
 import re
-import smtplib
 import sqlite3
 from datetime import datetime, time, timedelta, timezone
 from email.message import EmailMessage
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+import sesmail
 
 
 MONITORS = {"vavi", "sentinel"}
@@ -837,13 +838,7 @@ class DeliveryWorker:
         msg["To"] = to
         msg["Message-ID"] = message_id
         msg.set_content(body + self._links())
-        host = self.env.get("SMTP_HOST", "smtp.gmail.com")
-        port = int(self.env.get("SMTP_PORT", "587"))
-        user = self.env.get("SMTP_USER", self.env["EMAIL_FROM"])
-        with smtplib.SMTP(host, port, timeout=30) as smtp:
-            smtp.starttls()
-            smtp.login(user, self.env["SMTP_PASSWORD"])
-            smtp.send_message(msg)
+        sesmail.send(self.env, msg)
 
     def send_test(self, to, monitor):
         """Send a representative test email to ``to`` for one monitor.
