@@ -113,7 +113,7 @@ legend span { margin-right: 9px; color: var(--coral); font: 9px var(--mono); }
 .choice-grid input:focus-visible + span { outline: 3px solid rgba(77,132,219,.3); outline-offset: -3px; }
 
 .mode-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-.vavi-card .mode-grid { grid-template-columns: repeat(2, 1fr); }
+.sundew-card .mode-grid { grid-template-columns: repeat(2, 1fr); }
 .mode-grid label { position: relative; }
 .mode-grid input { position: absolute; opacity: 0; }
 .mode-grid span { display: grid; align-content: center; min-height: 76px; padding: 12px; border: 1px solid var(--line); background: white; cursor: pointer; }
@@ -227,7 +227,7 @@ footer { display: flex; justify-content: space-between; padding: 18px 0 25px; bo
   .choice-grid { grid-template-columns: repeat(2, 1fr); }
   .choice-grid label:nth-child(3) { border-left: 0; border-top: 1px solid var(--line); }
   .choice-grid label:nth-child(4) { border-top: 1px solid var(--line); }
-  .mode-grid, .vavi-card .mode-grid { grid-template-columns: 1fr; }
+  .mode-grid, .sundew-card .mode-grid { grid-template-columns: 1fr; }
   .mode-grid span { min-height: 62px; }
   .split-fields { grid-template-columns: 1fr; }
   .split-fields fieldset + fieldset { border-left: 0; border-top: 1px solid var(--line); }

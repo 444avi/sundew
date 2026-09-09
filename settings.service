@@ -1,12 +1,12 @@
 [Unit]
-Description=Vavi notification settings UI
+Description=Sundew notification settings UI
 After=network-online.target
 
 [Service]
 Type=simple
 User=ec2-user
-WorkingDirectory=/home/ec2-user/vavi
-ExecStart=/usr/bin/python3 /home/ec2-user/vavi/settings_server.py --host 127.0.0.1 --port 8787
+WorkingDirectory=/home/ec2-user/sundew
+ExecStart=/usr/bin/python3 /home/ec2-user/sundew/settings_server.py --host 127.0.0.1 --port 8787
 Restart=always
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1

@@ -21,7 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 import sentinel_config as sentinel_cfg
-import vavi
+import sundew
 from notification_app import (
     AppStore,
     DeliveryWorker,
@@ -62,7 +62,7 @@ def resolve_target(identity, requested, admin_emails):
 
 
 class SettingsHandler(BaseHTTPRequestHandler):
-    server_version = "VaviSettings/1.0"
+    server_version = "SundewSettings/1.0"
 
     def _store(self):
         return AppStore(self.server.app_db)
@@ -190,7 +190,7 @@ class SettingsHandler(BaseHTTPRequestHandler):
     def do_PUT(self):
         path = urlparse(self.path).path
         monitor = path.rsplit("/", 1)[-1]
-        if path not in {"/api/settings/vavi", "/api/settings/sentinel"}:
+        if path not in {"/api/settings/sundew", "/api/settings/sentinel"}:
             self._json(404, {"error": "not_found"})
             return
         try:
@@ -234,7 +234,7 @@ class SettingsHandler(BaseHTTPRequestHandler):
         monitor = payload.get("monitor")
         if monitor not in MONITORS:
             self._json(422, {"error": "validation",
-                             "fields": {"monitor": "Choose Vavi or Sentinel."}})
+                             "fields": {"monitor": "Choose Sundew or Sentinel."}})
             return
         target, error = self._resolve_target(self._requested_user(payload))
         if error:
@@ -291,7 +291,7 @@ class SettingsHandler(BaseHTTPRequestHandler):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Serve the Vavi notification settings UI.")
+    parser = argparse.ArgumentParser(description="Serve the Sundew notification settings UI.")
     parser.add_argument("--host", default="127.0.0.1",
                         help="listen address (default: loopback only)")
     parser.add_argument("--port", type=int, default=8787)
@@ -299,7 +299,7 @@ def main(argv=None):
     parser.add_argument("--env", default=os.path.join(HERE, ".env"))
     args = parser.parse_args(argv)
 
-    vavi.load_env(args.env)
+    sundew.load_env(args.env)
     env = dict(os.environ)
     store = AppStore(args.app_db)
     try:

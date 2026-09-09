@@ -1,5 +1,5 @@
 [Unit]
-Description=Sentinel - unscheduled material-events monitor (Vavi sibling)
+Description=Sentinel - unscheduled material-events monitor (Sundew sibling)
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=300
@@ -9,8 +9,8 @@ StartLimitBurst=5
 Type=simple
 # Set for Amazon Linux (EC2). Adjust User/paths if you install elsewhere.
 User=ec2-user
-WorkingDirectory=/home/ec2-user/vavi
-ExecStart=/usr/bin/python3 /home/ec2-user/vavi/sentinel.py
+WorkingDirectory=/home/ec2-user/sundew
+ExecStart=/usr/bin/python3 /home/ec2-user/sundew/sentinel.py
 Restart=always
 RestartSec=30
 

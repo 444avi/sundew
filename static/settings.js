@@ -5,7 +5,7 @@ const marketCapStops = [
   5e10, 1e11, 2.5e11, 5e11, 1e12,
 ];
 const modes = {
-  vavi: [
+  sundew: [
     ["immediate", "Immediate", "Each matching event as it happens"],
     ["digest", "Daily digest", "One grouped email at your saved time"],
   ],
@@ -92,7 +92,7 @@ function renderPreference(monitor, pref) {
   card.querySelector('[name="digest_time_local"]').value = pref.digest_time_local;
   setChecks(card, "categories", pref.categories);
   setChecks(card, "directions", pref.directions);
-  const special = monitor === "vavi" ? "kalshi_enabled" : "update_emails_enabled";
+  const special = monitor === "sundew" ? "kalshi_enabled" : "update_emails_enabled";
   card.querySelector(`[name="${special}"]`).checked = pref[special];
   if (monitor === "sentinel") {
     const slider = card.querySelector('[name="minimum_market_cap_index"]');
@@ -111,7 +111,7 @@ function updateConditional(card) {
   const mode = card.querySelector('[name="delivery_mode"]:checked')?.value;
   const showDigest = quiet || mode === "digest" || mode === "smart";
   card.querySelector(".digest-control").classList.toggle("is-hidden", !showDigest);
-  if (card.dataset.monitor === "vavi") {
+  if (card.dataset.monitor === "sundew") {
     const kalshiOn = card.querySelector('[name="kalshi_enabled"]').checked;
     card.querySelector(".kalshi-preview").classList.toggle("is-hidden", !kalshiOn);
   } else {
@@ -138,8 +138,8 @@ function payloadFor(card) {
     directions: selected(card, "directions"),
     timezone: timezone.value.trim(),
   };
-  payload[monitor === "vavi" ? "kalshi_enabled" : "update_emails_enabled"] =
-    card.querySelector(`[name="${monitor === "vavi" ? "kalshi_enabled" : "update_emails_enabled"}"]`).checked;
+  payload[monitor === "sundew" ? "kalshi_enabled" : "update_emails_enabled"] =
+    card.querySelector(`[name="${monitor === "sundew" ? "kalshi_enabled" : "update_emails_enabled"}"]`).checked;
   if (monitor === "sentinel") {
     const index = Number(card.querySelector('[name="minimum_market_cap_index"]').value);
     payload.minimum_market_cap_usd = marketCapStops[index];

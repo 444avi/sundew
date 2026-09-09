@@ -1,7 +1,7 @@
 """
 Sentinel configuration — the one obvious place to edit.
 
-Sentinel is Vavi's sibling: a live monitor for UNSCHEDULED material events
+Sentinel is Sundew's sibling: a live monitor for UNSCHEDULED material events
 (EDGAR filings, trading halts, ...). If it was on a calendar, it's not news.
 It surfaces and triages for a human; it does not predict prices or trade.
 
@@ -13,7 +13,7 @@ Pure data, no logic.
 # ---------------------------------------------------------------------------
 
 # SEC requires a descriptive User-Agent with a contact address.
-USER_AGENT = "Vavi Sentinel gupta.avdan@gmail.com"
+USER_AGENT = "Sundew Sentinel gupta.avdan@gmail.com"
 
 POLL_INTERVAL_SECONDS = 120
 HTTP_TIMEOUT_SECONDS = 30

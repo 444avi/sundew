@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Vavi — a market-awareness monitor for Donald Trump's Truth Social posts.
+Sundew — a market-awareness monitor for Donald Trump's Truth Social posts.
 
 It is an AWARENESS tool, not a trading signal. It characterizes a post
 (category, affected instruments, direction, magnitude) and emails the
@@ -31,13 +31,13 @@ from email.message import EmailMessage
 import config
 import kalshi
 import sesmail
-from notification_app import AppStore, vavi_categories
+from notification_app import AppStore, sundew_categories
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_DB = os.path.join(HERE, "vavi.db")
+DEFAULT_DB = os.path.join(HERE, "sundew.db")
 DEFAULT_APP_DB = os.path.join(HERE, "app.db")
 DEFAULT_ENV = os.path.join(HERE, ".env")
-USER_AGENT = "vavi/0.1 (+https://github.com/) market-awareness-monitor"
+USER_AGENT = "sundew/0.1 (+https://github.com/) market-awareness-monitor"
 
 
 # ---------------------------------------------------------------------------
@@ -375,7 +375,7 @@ def email_subject(post, c):
     )[:60]
     mag = (c.get("magnitude") or "").upper()
     tag = f"{arrow} [{cat}/{mag}]"
-    return f"Vavi {tag} {ents}".strip()
+    return f"Sundew {tag} {ents}".strip()
 
 
 def email_body(post, c, extra_section=""):
@@ -392,7 +392,7 @@ def email_body(post, c, extra_section=""):
         f"{post['url']}\n\n"
         f"{post['text']}\n\n"
         f"{'-' * 60}\n"
-        f"Vavi assessment (awareness only — NOT a trade signal):\n"
+        f"Sundew assessment (awareness only — NOT a trade signal):\n"
         f"  category:   {c.get('category')}\n"
         f"  direction:  {c.get('direction')}\n"
         f"  magnitude:  {c.get('magnitude')}\n"
@@ -407,24 +407,24 @@ def email_body(post, c, extra_section=""):
     return body
 
 
-def vavi_recipient(env):
-    """The plain-Vavi list. EMAIL_TO_VAVI if set, else EMAIL_TO. Keeping this
+def sundew_recipient(env):
+    """The plain-Sundew list. EMAIL_TO_SUNDEW if set, else EMAIL_TO. Keeping this
     separate from EMAIL_TO lets EMAIL_TO stay the shared "everyone" list that
-    Sentinel emails, while plain Vavi (EMAIL_TO_VAVI) and Vavi.ks (EMAIL_TO_KS)
-    address their own subsets. Unset EMAIL_TO_VAVI => falls back to EMAIL_TO, so
+    Sentinel emails, while plain Sundew (EMAIL_TO_SUNDEW) and Sundew.ks (EMAIL_TO_KS)
+    address their own subsets. Unset EMAIL_TO_SUNDEW => falls back to EMAIL_TO, so
     an existing single-list setup is unchanged."""
-    return env.get("EMAIL_TO_VAVI") or env.get("EMAIL_TO")
+    return env.get("EMAIL_TO_SUNDEW") or env.get("EMAIL_TO")
 
 
 def send_email(post, c, env, to=None, extra_section=""):
-    """Send one email. Recipient defaults to the plain-Vavi list
-    (EMAIL_TO_VAVI or EMAIL_TO); pass `to` for a different recipient (e.g. the
+    """Send one email. Recipient defaults to the plain-Sundew list
+    (EMAIL_TO_SUNDEW or EMAIL_TO); pass `to` for a different recipient (e.g. the
     Kalshi-augmented EMAIL_TO_KS) and `extra_section` to append a block to the
     body."""
     msg = EmailMessage()
     msg["Subject"] = email_subject(post, c)
     msg["From"] = env["EMAIL_FROM"]
-    msg["To"] = to or vavi_recipient(env)
+    msg["To"] = to or sundew_recipient(env)
     msg.set_content(email_body(post, c, extra_section))
     sesmail.send(env, msg)
 
@@ -508,14 +508,14 @@ def run_once(store, env, no_email=False, classify_enabled=True, app_store=None):
                     f"conf={classification.get('confidence')} relevant={rel}")
                 if rel:
                     subj = email_subject(p, classification)
-                    vavi_to = vavi_recipient(env)
+                    sundew_to = sundew_recipient(env)
                     if not no_email and app_store is not None:
                         result = app_store.publish_event(
-                            monitor="vavi",
+                            monitor="sundew",
                             source_event_id=p["id"],
                             event_version=1,
                             event_kind="original",
-                            categories=vavi_categories(classification),
+                            categories=sundew_categories(classification),
                             direction=classification.get("direction") or "unclear",
                             significance=classification.get("magnitude") or "low",
                             canonical_tier="immediate",
@@ -535,7 +535,7 @@ def run_once(store, env, no_email=False, classify_enabled=True, app_store=None):
                     # app_store. The CLI always supplies it after migration.
                     elif not no_email:
                         try:
-                            send_email(p, classification, env, to=vavi_to)
+                            send_email(p, classification, env, to=sundew_to)
                             did_notify = True
                             notified += 1
                             log(f"  emailed: {subj}")
@@ -543,11 +543,11 @@ def run_once(store, env, no_email=False, classify_enabled=True, app_store=None):
                             log(f"  email error: {e}")
                     else:
                         if app_store is not None:
-                            log(f"  [no-email] would create a canonical Vavi event: {subj}")
+                            log(f"  [no-email] would create a canonical Sundew event: {subj}")
                         else:
-                            log(f"  [no-email] would send -> {vavi_to}: {subj}")
+                            log(f"  [no-email] would send -> {sundew_to}: {subj}")
 
-                    # Legacy-only vavi.ks routing. The settings delivery worker
+                    # Legacy-only sundew.ks routing. The settings delivery worker
                     # enriches once per event and sends one private To address.
                     if app_store is None and ks_on:
                         section = ""
@@ -590,7 +590,7 @@ def require_env(env, keys, what):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(
-        prog="vavi",
+        prog="sundew",
         description="Market-awareness monitor for Trump Truth Social posts.",
     )
     ap.add_argument("--once", action="store_true",
@@ -620,8 +620,8 @@ def main(argv=None):
             ["EMAIL_FROM"],
             "email config: EMAIL_FROM (or pass --no-email)",
         )
-        if args.legacy_delivery and not vavi_recipient(env):
-            log("ERROR: legacy delivery requires EMAIL_TO_VAVI or EMAIL_TO")
+        if args.legacy_delivery and not sundew_recipient(env):
+            log("ERROR: legacy delivery requires EMAIL_TO_SUNDEW or EMAIL_TO")
             sys.exit(2)
     store = Store(args.db)
     app_store = AppStore(args.app_db)
@@ -630,14 +630,14 @@ def main(argv=None):
             env, default_timezone=env.get("APP_DEFAULT_TIMEZONE", "America/Los_Angeles"))
         if not args.no_email and app_store.get_settings() is None:
             log("ERROR: no notification user is configured; seed EMAIL_TO, "
-                "EMAIL_TO_VAVI, or EMAIL_TO_KS once")
+                "EMAIL_TO_SUNDEW, or EMAIL_TO_KS once")
             sys.exit(2)
         if args.once:
             run_once(store, env, no_email=args.no_email,
                      classify_enabled=classify_enabled,
                      app_store=None if args.legacy_delivery else app_store)
         else:
-            log(f"Vavi starting forever-loop, poll={config.POLL_INTERVAL_SECONDS}s")
+            log(f"Sundew starting forever-loop, poll={config.POLL_INTERVAL_SECONDS}s")
             while True:
                 try:
                     run_once(store, env, no_email=args.no_email,

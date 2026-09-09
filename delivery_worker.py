@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Shared per-user email and digest worker for Vavi and Sentinel."""
+"""Shared per-user email and digest worker for Sundew and Sentinel."""
 
 import argparse
 import os
@@ -7,7 +7,7 @@ import sys
 import time
 
 import sentinel_config as sentinel_cfg
-import vavi
+import sundew
 from notification_app import AppStore, DeliveryWorker
 
 
@@ -21,19 +21,19 @@ def log(message):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="Deliver pending Vavi and Sentinel notifications.")
+        description="Deliver pending Sundew and Sentinel notifications.")
     parser.add_argument("--once", action="store_true",
                         help="process currently due work and exit")
     parser.add_argument("--force-digests", action="store_true",
                         help="send non-empty queued digests now")
-    parser.add_argument("--monitor", choices=("vavi", "sentinel"))
+    parser.add_argument("--monitor", choices=("sundew", "sentinel"))
     parser.add_argument("--interval", type=int, default=15,
                         help="seconds between delivery scans")
     parser.add_argument("--app-db", default=DEFAULT_APP_DB)
     parser.add_argument("--env", default=os.path.join(HERE, ".env"))
     args = parser.parse_args(argv)
 
-    vavi.load_env(args.env)
+    sundew.load_env(args.env)
     env = dict(os.environ)
     missing = [key for key in ("EMAIL_FROM",) if not env.get(key)]
     if missing:

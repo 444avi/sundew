@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Sentinel — Vavi's sibling: a live monitor for UNSCHEDULED material events.
+Sentinel — Sundew's sibling: a live monitor for UNSCHEDULED material events.
 
 Not a news agent: if it was on a calendar, it's not news — suppress it.
 It surfaces and triages for a human to act on with discretion. It does not
@@ -12,8 +12,8 @@ Pipeline per pass:
   (scored separately, both logged) -> tiered alerts (email / digest / log)
   -> per-source heartbeats.
 
-CLI mirrors vavi.py: forever-loop by default, --once (idempotent, cron-safe),
---no-email, --no-llm, --source NAME. Stdlib only. Shares .env with Vavi.
+CLI mirrors sundew.py: forever-loop by default, --once (idempotent, cron-safe),
+--no-email, --no-llm, --source NAME. Stdlib only. Shares .env with Sundew.
 """
 
 import argparse
@@ -31,7 +31,7 @@ import sentinel_cluster as clu
 import sentinel_config as cfg
 import sentinel_sources as src
 import sesmail
-import vavi  # reuse load_env + .env conventions
+import sundew  # reuse load_env + .env conventions
 from notification_app import (AppStore, DeliveryWorker, sentinel_categories,
                               sentinel_significance)
 
@@ -352,7 +352,7 @@ def llm_same_event(item, cluster, cluster_members, api_key):
         payload = json.load(resp)
     text = "".join(b.get("text", "") for b in payload.get("content", [])
                    if b.get("type") == "text")
-    obj = vavi._parse_classification(text)  # tolerant JSON extraction
+    obj = sundew._parse_classification(text)  # tolerant JSON extraction
     return bool(obj.get("same_event")), text
 
 
@@ -492,7 +492,7 @@ def llm_triage(cluster, members, api_key):
         payload = json.load(resp)
     text = "".join(b.get("text", "") for b in payload.get("content", [])
                    if b.get("type") == "text")
-    obj = vavi._parse_classification(text)
+    obj = sundew._parse_classification(text)
     if "actionable" not in obj:
         return None
     obj.setdefault("direction", "unclear")
@@ -911,10 +911,10 @@ def main(argv=None):
     ap.add_argument("--app-db", default=DEFAULT_APP_DB,
                     help="shared users, preferences, events, and deliveries SQLite path")
     ap.add_argument("--env", default=os.path.join(HERE, ".env"),
-                    help=".env path (shared with vavi)")
+                    help=".env path (shared with sundew)")
     args = ap.parse_args(argv)
 
-    vavi.load_env(args.env)
+    sundew.load_env(args.env)
     env = dict(os.environ)
     if not args.no_llm and not env.get("ANTHROPIC_API_KEY"):
         log("ERROR: ANTHROPIC_API_KEY missing (or pass --no-llm)")

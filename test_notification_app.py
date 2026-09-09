@@ -7,7 +7,7 @@ from unittest import mock
 
 import sentinel
 import settings_server
-import vavi
+import sundew
 from notification_app import (
     AppStore,
     DeliveryWorker,
@@ -16,7 +16,7 @@ from notification_app import (
     next_digest_at,
     sentinel_categories,
     sentinel_significance,
-    vavi_categories,
+    sundew_categories,
 )
 
 
@@ -30,7 +30,7 @@ class NotificationAppTests(unittest.TestCase):
         self.store.close()
         self.temp.cleanup()
 
-    def publish(self, monitor="vavi", **overrides):
+    def publish(self, monitor="sundew", **overrides):
         values = {
             "monitor": monitor,
             "source_event_id": overrides.pop("source_event_id", "event-1"),
@@ -53,7 +53,7 @@ class NotificationAppTests(unittest.TestCase):
             "SELECT * FROM deliveries WHERE event_id=?", (event_id,)).fetchone()
 
     def test_category_and_significance_mapping_is_local(self):
-        labels = vavi_categories({
+        labels = sundew_categories({
             "category": "tariff",
             "entities": [
                 {"type": "country", "name": "China"},
@@ -83,7 +83,7 @@ class NotificationAppTests(unittest.TestCase):
         self.assertEqual(spring, datetime(2026, 3, 8, 10, 30, tzinfo=timezone.utc))
 
     def test_disabled_category_direction_and_significance_filters_are_audited(self):
-        self.store.update_preference("vavi", {
+        self.store.update_preference("sundew", {
             "categories": ["macro"], "directions": ["bearish"],
             "minimum_significance": "high",
         })
@@ -97,7 +97,7 @@ class NotificationAppTests(unittest.TestCase):
             source_event_id="sig", categories=["macro"], direction="bearish")
         self.assertEqual(self.delivery(significance["event_id"])["suppression_reason"],
                          "below_significance")
-        self.store.update_preference("vavi", {"enabled": False})
+        self.store.update_preference("sundew", {"enabled": False})
         disabled = self.publish(source_event_id="off")
         self.assertEqual(self.delivery(disabled["event_id"])["suppression_reason"],
                          "monitor_disabled")
@@ -111,7 +111,7 @@ class NotificationAppTests(unittest.TestCase):
         smart = self.publish("sentinel", source_event_id="event-2",
                              canonical_tier="digest")
         self.assertEqual(self.delivery(smart["event_id"])["status"], "queued_digest")
-        self.store.update_preference("vavi", {
+        self.store.update_preference("sundew", {
             "quiet_hours_enabled": True,
             "quiet_start_local": "22:00", "quiet_end_local": "07:00",
             "digest_time_local": "17:00",
@@ -124,7 +124,7 @@ class NotificationAppTests(unittest.TestCase):
     def test_sentinel_market_cap_threshold_filters_known_caps_and_fails_open(self):
         settings = self.store.get_settings()["preferences"]
         self.assertEqual(settings["sentinel"]["minimum_market_cap_usd"], 1_000_000_000)
-        self.assertNotIn("minimum_market_cap_usd", settings["vavi"])
+        self.assertNotIn("minimum_market_cap_usd", settings["sundew"])
         self.store.update_preference(
             "sentinel", {"minimum_market_cap_usd": 10_000_000_000})
 
@@ -142,7 +142,7 @@ class NotificationAppTests(unittest.TestCase):
 
         with self.assertRaises(ValidationError):
             self.store.update_preference(
-                "vavi", {"minimum_market_cap_usd": 10_000_000_000})
+                "sundew", {"minimum_market_cap_usd": 10_000_000_000})
 
     def test_duplicate_event_and_multi_category_create_one_delivery(self):
         first = self.publish(categories=["company", "macro"])
@@ -185,16 +185,16 @@ class NotificationAppTests(unittest.TestCase):
     def test_validation_is_atomic_and_monitor_specific(self):
         before = self.store.get_settings()
         with self.assertRaises(ValidationError):
-            self.store.update_preference("vavi", {
+            self.store.update_preference("sundew", {
                 "categories": [], "kalshi_enabled": True, "update_emails_enabled": True,
             })
         self.assertEqual(before, self.store.get_settings())
 
     def test_legacy_seed_never_overwrites_saved_preferences(self):
-        self.store.update_preference("vavi", {"kalshi_enabled": False,
+        self.store.update_preference("sundew", {"kalshi_enabled": False,
                                               "delivery_mode": "digest"})
         self.store.seed_from_env({"EMAIL_TO_KS": "owner@example.com"})
-        saved = self.store.get_settings()["preferences"]["vavi"]
+        saved = self.store.get_settings()["preferences"]["sundew"]
         self.assertFalse(saved["kalshi_enabled"])
         self.assertEqual(saved["delivery_mode"], "digest")
 
@@ -241,18 +241,18 @@ class NotificationAppTests(unittest.TestCase):
         self.assertEqual(sent, 2)
         self.assertEqual(sorted(recipients), ["one@example.com", "two@example.com"])
 
-    def test_vavi_classifies_once_then_creates_two_user_decisions(self):
+    def test_sundew_classifies_once_then_creates_two_user_decisions(self):
         self.store.close()
-        self.store = AppStore(os.path.join(self.temp.name, "vavi-app.db"))
+        self.store = AppStore(os.path.join(self.temp.name, "sundew-app.db"))
         self.store.seed_from_env({"EMAIL_TO": "one@example.com,two@example.com"})
         self.store.conn.execute(
-            "UPDATE notification_preferences SET delivery_mode='digest' WHERE monitor='vavi'")
+            "UPDATE notification_preferences SET delivery_mode='digest' WHERE monitor='sundew'")
         self.store.conn.commit()
-        monitor_store = vavi.Store(os.path.join(self.temp.name, "vavi-monitor.db"))
+        monitor_store = sundew.Store(os.path.join(self.temp.name, "sundew-monitor.db"))
         post = {
             "id": "post-1", "created_at": "2026-09-05T12:00:00+00:00",
             "text": "A new tariff on semiconductor imports", "url": "https://example.test/post",
-            "media": [], "hash": vavi.content_hash("A new tariff on semiconductor imports"),
+            "media": [], "hash": sundew.content_hash("A new tariff on semiconductor imports"),
         }
         classification = {
             "category": "tariff", "entities": [{"name": "Nvidia", "ticker": "NVDA", "type": "company"}],
@@ -260,13 +260,13 @@ class NotificationAppTests(unittest.TestCase):
             "confidence": .92, "rationale": "Tariffs can raise import costs.",
         }
         try:
-            with mock.patch("vavi.fetch_posts", return_value=[post]), \
-                    mock.patch("vavi.classify", return_value=classification) as classify:
-                vavi.run_once(monitor_store, {"ANTHROPIC_API_KEY": "unused"},
+            with mock.patch("sundew.fetch_posts", return_value=[post]), \
+                    mock.patch("sundew.classify", return_value=classification) as classify:
+                sundew.run_once(monitor_store, {"ANTHROPIC_API_KEY": "unused"},
                               app_store=self.store)
             classify.assert_called_once()
             self.assertEqual(self.store.conn.execute(
-                "SELECT COUNT(*) FROM notification_events WHERE monitor='vavi'").fetchone()[0], 1)
+                "SELECT COUNT(*) FROM notification_events WHERE monitor='sundew'").fetchone()[0], 1)
             self.assertEqual(self.store.conn.execute(
                 "SELECT COUNT(*) FROM deliveries").fetchone()[0], 2)
         finally:
@@ -321,9 +321,9 @@ class PerRecipientScopingTests(unittest.TestCase):
         self.temp.cleanup()
 
     def test_updates_are_scoped_to_the_named_recipient(self):
-        self.store.update_preference("vavi", {"delivery_mode": "digest"}, email="aa@example.com")
-        aa = self.store.get_settings("aa@example.com")["preferences"]["vavi"]
-        bb = self.store.get_settings("bb@example.com")["preferences"]["vavi"]
+        self.store.update_preference("sundew", {"delivery_mode": "digest"}, email="aa@example.com")
+        aa = self.store.get_settings("aa@example.com")["preferences"]["sundew"]
+        bb = self.store.get_settings("bb@example.com")["preferences"]["sundew"]
         self.assertEqual(aa["delivery_mode"], "digest")
         self.assertEqual(bb["delivery_mode"], "immediate")
 
@@ -335,7 +335,7 @@ class PerRecipientScopingTests(unittest.TestCase):
         self.assertIsNone(self.store.get_settings("nobody@example.com"))
         self.assertIsNone(self.store.get_user("nobody@example.com"))
         with self.assertRaises(ValidationError):
-            self.store.update_preference("vavi", {"delivery_mode": "digest"},
+            self.store.update_preference("sundew", {"delivery_mode": "digest"},
                                          email="nobody@example.com")
 
     def test_unsubscribe_only_affects_the_named_recipient(self):
@@ -356,8 +356,8 @@ class PerRecipientScopingTests(unittest.TestCase):
         captured = {}
         worker._send = lambda to, subject, body, message_id: captured.update(
             to=to, subject=subject, body=body, message_id=message_id)
-        result = worker.send_test("aa@example.com", "vavi")
-        self.assertEqual(result, {"status": "sent", "to": "aa@example.com", "monitor": "vavi"})
+        result = worker.send_test("aa@example.com", "sundew")
+        self.assertEqual(result, {"status": "sent", "to": "aa@example.com", "monitor": "sundew"})
         self.assertEqual(captured["to"], "aa@example.com")
         self.assertTrue(captured["subject"].startswith("[TEST]"))
         self.assertIn("test email", captured["body"].lower())

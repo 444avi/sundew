@@ -1,5 +1,5 @@
 """
-Vavi configuration — the one obvious place to edit.
+Sundew configuration — the one obvious place to edit.
 
 Everything tunable lives here: runtime knobs, the cheap keyword pre-filter,
 and the gazetteers (macro / geopolitical / commodity terms + company->ticker
@@ -32,17 +32,17 @@ ANTHROPIC_MODEL = "claude-sonnet-4-6"
 COLD_START_BACKFILL = 5
 
 # ---------------------------------------------------------------------------
-# Kalshi augmentation (the "vavi.ks" second copy) — see kalshi.py
+# Kalshi augmentation (the "sundew.ks" second copy) — see kalshi.py
 # ---------------------------------------------------------------------------
 # Recipient lists (all in .env; see .env.example for the full description):
-#   EMAIL_TO       -> shared "everyone" list. Sentinel emails it; plain Vavi
-#                     falls back to it when EMAIL_TO_VAVI is unset.
-#   EMAIL_TO_VAVI  -> plain-Vavi subset (no Kalshi section).
-#   EMAIL_TO_KS    -> Vavi.ks subset (augmented copy).
-# The plain-Vavi and Vavi.ks emails are two independent messages, so keep
-# EMAIL_TO_VAVI and EMAIL_TO_KS disjoint — nobody on both.
+#   EMAIL_TO       -> shared "everyone" list. Sentinel emails it; plain Sundew
+#                     falls back to it when EMAIL_TO_SUNDEW is unset.
+#   EMAIL_TO_SUNDEW  -> plain-Sundew subset (no Kalshi section).
+#   EMAIL_TO_KS    -> Sundew.ks subset (augmented copy).
+# The plain-Sundew and Sundew.ks emails are two independent messages, so keep
+# EMAIL_TO_SUNDEW and EMAIL_TO_KS disjoint — nobody on both.
 #
-# When a post passes Vavi's relevance gate, the plain email goes out first and
+# When a post passes Sundew's relevance gate, the plain email goes out first and
 # UNCHANGED. If KS_ENABLED and EMAIL_TO_KS is set, the augmented copy (same body
 # + a "Relevant Kalshi markets" section) is then sent to EMAIL_TO_KS. Kalshi
 # reads are public — no API key. Turn the whole feature off here (or by leaving
