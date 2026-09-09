@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Kalshi augmentation for Vavi — turn a Vavi classification into a short list of
+Kalshi augmentation for Sundew — turn a Sundew classification into a short list of
 relevant, live Kalshi prediction markets, with NO extra LLM call.
 
-This module is standalone and stdlib-only. It knows nothing about the Vavi DB
-and can be exercised on its own (see `python3 kalshi.py --demo`). Vavi calls
+This module is standalone and stdlib-only. It knows nothing about the Sundew DB
+and can be exercised on its own (see `python3 kalshi.py --demo`). Sundew calls
 two things:
 
     find_markets(c)        -> the top few live markets for a classification
@@ -13,7 +13,7 @@ two things:
 Matching is fetch-on-demand and category-scoped. A Trump post only ever falls
 into a handful of market-relevant buckets (macro/monetary, tariff/trade,
 commodity, country/geopolitical, company), so there is no need to index all of
-Kalshi. When (and only when) a post clears Vavi's relevance gate, we:
+Kalshi. When (and only when) a post clears Sundew's relevance gate, we:
 
   1. Map its `category` + `entities` to a small set of curated Kalshi *series*
      via the seed map below (CATEGORY_SERIES / TERM_SERIES).
@@ -42,7 +42,7 @@ Design notes (verified live 2026-08 against the PUBLIC read API):
     (e.g. KXFEDDECISION-28JAN-H0 -> KXFEDDECISION).
 
 Everything here fails open: any network/parse error yields fewer (or no)
-markets and never raises into Vavi's send path.
+markets and never raises into Sundew's send path.
 """
 
 import json
@@ -54,12 +54,12 @@ from datetime import datetime, timezone
 
 import config
 
-USER_AGENT = "vavi-kalshi/0.1 (+https://github.com/) market-awareness-monitor"
+USER_AGENT = "sundew-kalshi/0.1 (+https://github.com/) market-awareness-monitor"
 WEB_BASE = "https://kalshi.com"
 
 
 # ---------------------------------------------------------------------------
-# Curated seed map: Vavi vocabulary -> Kalshi series tickers.
+# Curated seed map: Sundew vocabulary -> Kalshi series tickers.
 #
 # Tickers below were looked up live against the Kalshi series catalog; series
 # rotate (weekly/daily markets open and close around events), so some may have
@@ -294,7 +294,7 @@ def _query_from_classification(c):
 
 
 def find_markets(c, base=None, ttl=None, max_markets=None):
-    """Rank live Kalshi markets against a Vavi classification dict.
+    """Rank live Kalshi markets against a Sundew classification dict.
 
     Fetches (on demand, cached) only the curated series relevant to the post's
     category/entities — never all of Kalshi — and returns up to `max_markets`
@@ -370,7 +370,7 @@ def render_section(markets):
     lines = [
         "-" * 60,
         "Relevant Kalshi markets",
-        "Live Kalshi market prices — not Vavi predictions.",
+        "Live Kalshi market prices — not Sundew predictions.",
         "",
     ]
     for m in markets:

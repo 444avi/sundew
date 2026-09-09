@@ -1,5 +1,5 @@
 [Unit]
-Description=Vavi - Trump Truth Social market-awareness monitor
+Description=Sundew - Trump Truth Social market-awareness monitor
 After=network-online.target
 Wants=network-online.target
 # Don't hammer on repeated crashes.
@@ -9,10 +9,10 @@ StartLimitBurst=5
 [Service]
 Type=simple
 # Set for Amazon Linux (EC2). Adjust User/paths if you install elsewhere.
-# Vavi is stdlib-only, so the system python3 is fine.
+# Sundew is stdlib-only, so the system python3 is fine.
 User=ec2-user
-WorkingDirectory=/home/ec2-user/vavi
-ExecStart=/usr/bin/python3 /home/ec2-user/vavi/vavi.py
+WorkingDirectory=/home/ec2-user/sundew
+ExecStart=/usr/bin/python3 /home/ec2-user/sundew/sundew.py
 Restart=always
 RestartSec=30
 

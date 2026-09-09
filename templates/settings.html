@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
-  <title>Vavi · Notification Desk</title>
+  <title>Sundew · Notification Desk</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -13,9 +13,9 @@
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="/" aria-label="Vavi settings home">
+    <a class="brand" href="/" aria-label="Sundew settings home">
       <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
-      <strong>Vavi</strong><span>Arboretum Investments</span>
+      <strong>Sundew</strong><span>Arboretum Investments</span>
     </a>
     <div class="topbar-status"><span class="status-dot"></span> Notification desk</div>
     <div class="desk-label">Arboretum Investments / Research desk</div>
@@ -24,7 +24,7 @@
   <main>
     <section class="hero" aria-labelledby="page-title">
       <div>
-        <p class="kicker coral">Notification control / Vavi + Sentinel</p>
+        <p class="kicker coral">Notification control / Sundew + Sentinel</p>
         <h1 id="page-title">Keep the signal.<br><em>Shape the delivery.</em></h1>
       </div>
       <p class="hero-copy">Choose what reaches you and when. The monitors still fetch, classify, and score once; your settings only filter or organize eligible events afterward.</p>
@@ -68,15 +68,15 @@
     <section class="notice-panel is-hidden" id="not-recipient" aria-live="polite">
       <p class="section-index">Access</p>
       <h2>You’re signed in, but not on the recipient list.</h2>
-      <p id="not-recipient-detail">Ask an administrator to add your address to Vavi or Sentinel delivery.</p>
+      <p id="not-recipient-detail">Ask an administrator to add your address to Sundew or Sentinel delivery.</p>
     </section>
 
     <div class="monitor-grid" id="settings-root" aria-live="polite">
-      <article class="monitor-card vavi-card" data-monitor="vavi">
+      <article class="monitor-card sundew-card" data-monitor="sundew">
         <header class="card-header">
           <div>
             <p class="section-index">01 / TRUTH SOCIAL</p>
-            <h2>Vavi</h2>
+            <h2>Sundew</h2>
             <p>Market-relevant posts, characterized after one canonical classification.</p>
           </div>
           <label class="switch-control">
@@ -95,7 +95,7 @@
 
           <fieldset>
             <legend><span>02</span> Delivery mode</legend>
-            <div class="mode-grid" data-modes="vavi"></div>
+            <div class="mode-grid" data-modes="sundew"></div>
             <span class="field-error" data-error="delivery_mode"></span>
           </fieldset>
 
@@ -120,7 +120,7 @@
             <fieldset>
               <legend><span>05</span> Email content</legend>
               <label class="inline-toggle"><input type="checkbox" name="kalshi_enabled"><span></span><b>Include Kalshi section</b></label>
-              <p class="field-note">Adds relevant markets to Vavi emails. This is not a third monitor.</p>
+              <p class="field-note">Adds relevant markets to Sundew emails. This is not a third monitor.</p>
               <span class="field-error" data-error="kalshi_enabled"></span>
             </fieldset>
           </div>
@@ -143,8 +143,8 @@
             <span class="field-error" data-error="digest_time_local"></span>
           </fieldset>
 
-          <section class="preview" aria-label="Static Vavi email preview">
-            <div class="preview-top"><span>STATIC EMAIL PREVIEW</span><i>VAVI / TARIFF · HIGH</i></div>
+          <section class="preview" aria-label="Static Sundew email preview">
+            <div class="preview-top"><span>STATIC EMAIL PREVIEW</span><i>SUNDEW / TARIFF · HIGH</i></div>
             <h3>New semiconductor tariff announced</h3>
             <p>A market-relevant post names chip imports and a new tariff timetable.</p>
             <div class="preview-meta"><span>Direction · Bearish</span><span>Company + Macro</span><span>Confidence · 0.91</span></div>
@@ -154,7 +154,7 @@
           <div class="form-footer">
             <button type="button" class="ghost-button test-email-button">Send test email</button>
             <span class="save-status" role="status"></span>
-            <button type="submit" class="primary-button">Save Vavi <span>→</span></button>
+            <button type="submit" class="primary-button">Save Sundew <span>→</span></button>
           </div>
         </form>
       </article>
@@ -265,13 +265,13 @@
       <div>
         <p class="section-index">03 / SUBSCRIPTION</p>
         <h2>Manage the address, not the monitors.</h2>
-        <p>Monitor toggles above preserve your account. Unsubscribe disables all future delivery for this verified address; it does not stop Vavi or Sentinel ingestion.</p>
+        <p>Monitor toggles above preserve your account. Unsubscribe disables all future delivery for this verified address; it does not stop Sundew or Sentinel ingestion.</p>
       </div>
       <button type="button" id="unsubscribe" class="text-button">Unsubscribe this address →</button>
     </section>
   </main>
 
-  <footer><span>VAVI / ARBORETUM INVESTMENTS / INTERNAL RESEARCH</span><span>Preferences apply to future delivery decisions only.</span></footer>
+  <footer><span>SUNDEW / ARBORETUM INVESTMENTS / INTERNAL RESEARCH</span><span>Preferences apply to future delivery decisions only.</span></footer>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 </body>

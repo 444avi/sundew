@@ -1,12 +1,12 @@
 [Unit]
-Description=Vavi and Sentinel notification delivery worker
+Description=Sundew and Sentinel notification delivery worker
 After=network-online.target
 
 [Service]
 Type=simple
 User=ec2-user
-WorkingDirectory=/home/ec2-user/vavi
-ExecStart=/usr/bin/python3 /home/ec2-user/vavi/delivery_worker.py
+WorkingDirectory=/home/ec2-user/sundew
+ExecStart=/usr/bin/python3 /home/ec2-user/sundew/delivery_worker.py
 Restart=always
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1

@@ -2,7 +2,7 @@
 
 ## Objective
 
-Build a user-facing settings UI and delivery layer for Vavi and Sentinel. Users will be able to reduce or reorganize the notifications they receive without causing additional classification, triage, source-fetching, polling, or per-user market-data work.
+Build a user-facing settings UI and delivery layer for Sundew and Sentinel. Users will be able to reduce or reorganize the notifications they receive without causing additional classification, triage, source-fetching, polling, or per-user market-data work.
 
 Every preference must be applied after the monitors have performed their existing ingestion and classification. The monitors create one canonical event, and the delivery layer filters that event for each user.
 
@@ -14,7 +14,7 @@ The supported user settings are:
 - Quiet hours.
 - Direction.
 - Minimum significance.
-- Kalshi section for Vavi.
+- Kalshi section for Sundew.
 - Update emails for Sentinel.
 - Digest time.
 
@@ -56,13 +56,13 @@ Create a per-user delivery decision
 Send immediately or place in that user's digest
 ```
 
-Kalshi data may be fetched once per canonical Vavi event when at least one matched recipient has the Kalshi section enabled. The result must be cached and reused for every recipient of that event.
+Kalshi data may be fetched once per canonical Sundew event when at least one matched recipient has the Kalshi section enabled. The result must be cached and reused for every recipient of that event.
 
 ## User settings
 
 ### Availability by monitor
 
-| Setting | Vavi | Sentinel |
+| Setting | Sundew | Sentinel |
 |---|---:|---:|
 | Enable/disable | Yes | Yes |
 | Categories | Yes | Yes |
@@ -76,7 +76,7 @@ Kalshi data may be fetched once per canonical Vavi event when at least one match
 
 ### Enable or disable
 
-Vavi and Sentinel each have an independent enabled toggle.
+Sundew and Sentinel each have an independent enabled toggle.
 
 - Disabling a monitor stops all delivery from that monitor for the user.
 - It does not stop ingestion, classification, clustering, or delivery to other users.
@@ -94,9 +94,9 @@ Users may select any combination of:
 
 At least one category must remain selected while a monitor is enabled. Category matching uses OR logic. If an event matches more than one selected category, it still creates at most one email for that user.
 
-#### Vavi category mapping
+#### Sundew category mapping
 
-Categories must be derived locally from Vavi's existing classification and entity fields.
+Categories must be derived locally from Sundew's existing classification and entity fields.
 
 | Existing classification data | User-facing category |
 |---|---|
@@ -120,14 +120,14 @@ Sentinel categories must be derived from existing event types and entities witho
 
 ### Delivery mode
 
-#### Vavi
+#### Sundew
 
-Vavi supports:
+Sundew supports:
 
 - `Immediate`: each matching event is sent as it happens.
 - `Daily digest`: all matching events are collected into one daily email.
 
-Vavi does not need a Smart option because its current relevant events belong to one immediate tier.
+Sundew does not need a Smart option because its current relevant events belong to one immediate tier.
 
 #### Sentinel
 
@@ -183,7 +183,7 @@ Users choose:
 
 Low means the broadest set already eligible under the production monitor. It must not expose events that the current global system considers log-only or irrelevant.
 
-#### Vavi mapping
+#### Sundew mapping
 
 | User setting | Allowed existing magnitude |
 |---|---|
@@ -201,7 +201,7 @@ Sentinel scores events on a continuous `impact` (0–1), not a low/medium/high l
 | Medium | `0.70` ≤ impact < `0.85` |
 | Low | eligible for immediate or digest delivery, but impact < `0.70` |
 
-The user setting then filters against the derived enum exactly as Vavi does:
+The user setting then filters against the derived enum exactly as Sundew does:
 
 | User setting | Allowed derived significance |
 |---|---|
@@ -213,17 +213,17 @@ Only events already eligible for immediate or digest delivery are bucketed at al
 
 ### Kalshi section
 
-This setting appears only for Vavi.
+This setting appears only for Sundew.
 
-- Off sends the normal Vavi content.
+- Off sends the normal Sundew content.
 - On appends the existing relevant Kalshi-market section.
 - All other preference filters run before Kalshi formatting.
 - Kalshi results are fetched at most once per canonical event and reused for all matched users.
 - If no matched user has Kalshi enabled, skip the lookup.
-- A Kalshi error must not block the normal Vavi email.
+- A Kalshi error must not block the normal Sundew email.
 - Users do not control the number of markets, series mappings, cache time, or ranking logic.
 
-This is a presentation option within Vavi, not a separate monitor subscription.
+This is a presentation option within Sundew, not a separate monitor subscription.
 
 ### Sentinel update emails
 
@@ -272,7 +272,7 @@ Sentinel source-health warnings are operational alerts. They must be routed to a
 
 User preferences and deliveries should live in an application database rather than `.env`. Existing `.env` recipient lists are retained only during migration.
 
-This is a third SQLite file (e.g. `app.db`) alongside `vavi.db` and `sentinel.db`, on the same EBS volume, opened in WAL mode like the existing stores. It introduces a new coupling: both monitor processes and the delivery worker now open and write to `app.db` — the monitors to append canonical events, the worker to read events and write deliveries. Because there are now multiple writers to one file, keep every writer in WAL mode with a busy timeout, keep write transactions short, and never hold the connection open across a network call (SMTP, Kalshi, Finnhub). The monitors' own `vavi.db` / `sentinel.db` writes are unchanged.
+This is a third SQLite file (e.g. `app.db`) alongside `sundew.db` and `sentinel.db`, on the same EBS volume, opened in WAL mode like the existing stores. It introduces a new coupling: both monitor processes and the delivery worker now open and write to `app.db` — the monitors to append canonical events, the worker to read events and write deliveries. Because there are now multiple writers to one file, keep every writer in WAL mode with a busy timeout, keep write transactions short, and never hold the connection open across a network call (SMTP, Kalshi, Finnhub). The monitors' own `sundew.db` / `sentinel.db` writes are unchanged.
 
 ### Users
 
@@ -295,7 +295,7 @@ Email addresses must be unique after normalization. Only verified, active users 
 notification_preferences
 - id
 - user_id
-- monitor: vavi | sentinel
+- monitor: sundew | sentinel
 - enabled
 - delivery_mode: immediate | smart | digest
 - minimum_significance: low | medium | high
@@ -313,7 +313,7 @@ Constraints:
 
 - One preference record per user and monitor.
 - `smart` is valid only for Sentinel.
-- `kalshi_enabled` is valid only for Vavi.
+- `kalshi_enabled` is valid only for Sundew.
 - `update_emails_enabled` is valid only for Sentinel.
 - Local times must be valid wall-clock values.
 - Times are interpreted using `users.timezone`.
@@ -345,7 +345,7 @@ The monitors keep their existing detailed databases. Add a common delivery-facin
 ```text
 notification_events
 - id
-- monitor: vavi | sentinel
+- monitor: sundew | sentinel
 - source_event_id
 - event_version
 - event_kind: original | update
@@ -362,7 +362,7 @@ notification_events
 
 Add a unique constraint on `(monitor, source_event_id, event_version)`.
 
-`significance` is the derived low/medium/high enum for both monitors — Vavi's magnitude verbatim, Sentinel's impact bucketed by the bands above — so the evaluator compares it uniformly and never needs a raw impact float. `direction` is the value the pipeline already produced; for Sentinel that comes from triage and exists only for events that reached the triage step, so a canonical event without one stores `unclear`.
+`significance` is the derived low/medium/high enum for both monitors — Sundew's magnitude verbatim, Sentinel's impact bucketed by the bands above — so the evaluator compares it uniformly and never needs a raw impact float. `direction` is the value the pipeline already produced; for Sentinel that comes from triage and exists only for events that reached the triage step, so a canonical event without one stores `unclear`.
 
 Structured subject and body data should be stored so messages can be rendered for immediate delivery or a later digest without reclassifying the event.
 
@@ -420,20 +420,20 @@ The evaluator must not invoke external APIs or an LLM. It operates entirely on t
 
 ## Monitor integration
 
-### Vavi changes
+### Sundew changes
 
-After Vavi's existing relevance gate:
+After Sundew's existing relevance gate:
 
 1. Derive the four user-facing category labels from the existing classification.
-2. Store one canonical Vavi notification event.
-3. Evaluate the event against active Vavi preferences.
+2. Store one canonical Sundew notification event.
+3. Evaluate the event against active Sundew preferences.
 4. Create immediate, digest, or suppressed delivery records.
 5. Check whether any matched delivery requires Kalshi.
 6. Fetch and cache Kalshi once if needed.
 7. Render plain or augmented content without changing the canonical classification.
 8. Record each delivery result separately.
 
-Vavi must no longer treat its global `notified` field as proof that every intended user received the message. It can remain as monitor-level historical metadata during migration.
+Sundew must no longer treat its global `notified` field as proof that every intended user received the message. It can remain as monitor-level historical metadata during migration.
 
 ### Sentinel changes
 
@@ -472,7 +472,7 @@ A failed delivery to one user must not affect delivery to another user. Subscrib
 
 ## Settings UI
 
-Use a single settings page with separate Vavi and Sentinel cards.
+Use a single settings page with separate Sundew and Sentinel cards.
 
 ### Shared page elements
 
@@ -485,9 +485,9 @@ Use a single settings page with separate Vavi and Sentinel cards.
 
 The preview must not invoke an LLM, Kalshi, Finnhub, or a monitor source.
 
-### Vavi card
+### Sundew card
 
-- Enable Vavi toggle.
+- Enable Sundew toggle.
 - Category checkboxes.
 - Delivery mode: Immediate or Daily Digest.
 - Quiet-hours toggle and start/end inputs.
@@ -516,7 +516,7 @@ Explain that:
 - `Unclear` includes events whose market direction cannot be confidently determined. For Sentinel this also covers most digest-tier events: a direction is only produced when an event reaches LLM triage (an immediate/update candidate), so lower-tier events carry `unclear` by default. Deselecting `Unclear` for Sentinel therefore filters out most digest content — the UI should say so next to the control.
 - `Low` is the broadest normal coverage, not every event collected by the service.
 - Events received during quiet hours will appear in the next digest.
-- The Kalshi option changes Vavi email content rather than enabling a third monitor.
+- The Kalshi option changes Sundew email content rather than enabling a third monitor.
 - Sentinel country and commodity coverage is limited by its current sources.
 - Turning off updates suppresses follow-up emails but not new Sentinel events.
 
@@ -526,7 +526,7 @@ A minimal API surface:
 
 ```text
 GET  /api/settings
-PUT  /api/settings/vavi
+PUT  /api/settings/sundew
 PUT  /api/settings/sentinel
 POST /api/settings/test-email
 POST /api/unsubscribe
@@ -552,7 +552,7 @@ The unsubscribe endpoint should use a scoped, expiring or revocable token. It mu
 
 Defaults must preserve existing behavior as closely as possible.
 
-### Vavi defaults
+### Sundew defaults
 
 - Enabled.
 - All categories selected.
@@ -560,7 +560,7 @@ Defaults must preserve existing behavior as closely as possible.
 - Quiet hours disabled.
 - All directions selected.
 - Minimum significance Low.
-- Kalshi off for plain-Vavi recipients and on for existing `vavi.ks` recipients.
+- Kalshi off for plain-Sundew recipients and on for existing `sundew.ks` recipients.
 - A sensible saved digest time even when digest mode is inactive.
 
 ### Sentinel defaults
@@ -579,8 +579,8 @@ Defaults must preserve existing behavior as closely as possible.
 Seed the application database from existing recipient lists.
 
 - Each `EMAIL_TO` address receives a Sentinel preference.
-- Each `EMAIL_TO_VAVI` address receives a Vavi preference with Kalshi disabled.
-- Each `EMAIL_TO_KS` address receives a Vavi preference with Kalshi enabled.
+- Each `EMAIL_TO_SUNDEW` address receives a Sundew preference with Kalshi disabled.
+- Each `EMAIL_TO_KS` address receives a Sundew preference with Kalshi enabled.
 - If an address appears in multiple lists, create one user with the appropriate monitor preferences.
 - Normalize and deduplicate email addresses before insertion.
 - Seed every migrated user as `status = active` with `email_verified_at` set (they are pre-verified legacy recipients). The evaluator refuses unverified or inactive users, so a seed that leaves either unset would silently stop all delivery at cutover.
@@ -612,7 +612,7 @@ Rollout sequence:
 
 ### Phase 2: Canonical event adapters
 
-- Convert relevant Vavi classifications into canonical events.
+- Convert relevant Sundew classifications into canonical events.
 - Convert Sentinel originals and material updates into canonical events.
 - Preserve existing monitor databases and deduplication.
 - Add idempotent event-version keys.
@@ -635,7 +635,7 @@ Rollout sequence:
 
 ### Phase 5: UI
 
-- Build Vavi and Sentinel settings cards.
+- Build Sundew and Sentinel settings cards.
 - Add conditional controls and validation.
 - Add timezone, quiet-hours, and digest-time inputs.
 - Add accessible descriptions and save feedback.
@@ -695,7 +695,7 @@ Verify:
 
 Verify that the refactor does not change:
 
-- Vavi polling, deduplication, prefiltering, or relevance classification.
+- Sundew polling, deduplication, prefiltering, or relevance classification.
 - Sentinel ingestion, clustering, scoring, triage, or market-cap gating.
 - Cold-start suppression behavior.
 - Kalshi fail-open behavior.
@@ -733,4 +733,4 @@ The feature is complete when:
 - SMTP failures can be retried without duplicate successful deliveries.
 - Subscriber email addresses remain private.
 - Operational warnings are delivered only to administrators.
-- Existing Vavi and Sentinel monitoring behavior remains intact.
+- Existing Sundew and Sentinel monitoring behavior remains intact.

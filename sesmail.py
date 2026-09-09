@@ -1,4 +1,4 @@
-"""Email delivery for the vavi monitors.
+"""Email delivery for the sundew monitors.
 
 Two backends sit behind one ``send(env, msg)`` interface, chosen by
 configuration so callers never change and switching providers is an env-only

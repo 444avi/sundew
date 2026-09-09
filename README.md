@@ -1,11 +1,11 @@
-# Vavi
+# Sundew
 
 A market-**awareness** monitor for Donald Trump's Truth Social posts. It watches
 CNN's free archive, decides whether a post is relevant to markets
 (macro / monetary / tariffs / geopolitics / countries / commodities / specific
 companies), and emails you the relevant ones with the signal in the subject line.
 
-**It is not a trading signal.** Vavi characterizes a post — category, affected
+**It is not a trading signal.** Sundew characterizes a post — category, affected
 instruments, likely direction, and a qualitative magnitude (low/med/high). It
 never emits fake numeric predictions like "SPY −1.2%" and contains no trading
 logic.
@@ -29,7 +29,7 @@ that cost an API call are the ones with a plausible market hook. On the live
 archive it lets through ~9% of posts; the LLM then marks campaign/grievance
 survivors as `is_noise` and they are suppressed.
 
-Each Vavi preference can optionally append a short list of live, on-topic
+Each Sundew preference can optionally append a short list of live, on-topic
 **Kalshi** prediction markets. See [Kalshi email content](#kalshi-email-content)
 below. Enrichment is downstream of every filter, cached once on the canonical
 event, and never changes the normal notification when it fails.
@@ -57,7 +57,7 @@ Stdlib-only — **no `pip install` required**, even for the Anthropic call (it u
 `urllib`). Python 3.9+ is required for the standard-library IANA timezone data.
 
 ```bash
-cd vavi
+cd sundew
 cp .env.example .env      # then fill in your keys (see below)
 ```
 
@@ -69,17 +69,17 @@ cp .env.example .env      # then fill in your keys (see below)
   Gmail use a **16-char App Password**, not your account password.
 - **Legacy recipient lists** (each may be a comma-separated list of addresses):
   - `EMAIL_TO` — the shared **"everyone"** list. **Sentinel** emails it, and
-    plain Vavi **falls back** to it when `EMAIL_TO_VAVI` is unset.
-  - `EMAIL_TO_VAVI` — the **plain-Vavi** subset (no Kalshi section). Optional;
-    unset ⇒ plain Vavi uses `EMAIL_TO`.
-  - `EMAIL_TO_KS` — the **vavi.ks** subset (gets the augmented copy). Optional;
+    plain Sundew **falls back** to it when `EMAIL_TO_SUNDEW` is unset.
+  - `EMAIL_TO_SUNDEW` — the **plain-Sundew** subset (no Kalshi section). Optional;
+    unset ⇒ plain Sundew uses `EMAIL_TO`.
+  - `EMAIL_TO_KS` — the **sundew.ks** subset (gets the augmented copy). Optional;
     unset ⇒ no second copy is ever sent.
 
   These lists seed verified users and default preferences into `app.db` on the
   first run. Saved settings are authoritative afterward and startup never
   overwrites a user's choices. For
-  *"everyone gets Sentinel; each person gets vavi OR vavi.ks"*, set `EMAIL_TO` =
-  the union, `EMAIL_TO_VAVI` = the plain folk, `EMAIL_TO_KS` = the Kalshi folk.
+  *"everyone gets Sentinel; each person gets sundew OR sundew.ks"*, set `EMAIL_TO` =
+  the union, `EMAIL_TO_SUNDEW` = the plain folk, `EMAIL_TO_KS` = the Kalshi folk.
   For the original single-list behavior, just set `EMAIL_TO` and leave the other
   two empty. Also set `APP_DEFAULT_TIMEZONE` to the seeded user's IANA timezone,
   `SETTINGS_PUBLIC_URL` to the operator-controlled settings URL, and
@@ -88,22 +88,22 @@ cp .env.example .env      # then fill in your keys (see below)
 ## Run
 
 All commands must be run **from the directory containing the scripts** — `cd`
-into it first. Running `python3 vavi.py` from your home directory gives
+into it first. Running `python3 sundew.py` from your home directory gives
 `No such file or directory`.
 
 ```bash
-cd ~/vavi
+cd ~/sundew
 
 # Step-by-step testing (what was used to build it):
-python3 vavi.py --once --no-classify --no-email   # poll + dedup + pre-filter only
-python3 vavi.py --once --no-email                  # + LLM classify, dry run (no send)
-python3 vavi.py --once                             # full pass incl. email
+python3 sundew.py --once --no-classify --no-email   # poll + dedup + pre-filter only
+python3 sundew.py --once --no-email                  # + LLM classify, dry run (no send)
+python3 sundew.py --once                             # full pass incl. email
 
 # Forever-loop (the 24/7 mode):
-python3 vavi.py
+python3 sundew.py
 ```
 
-Flags (`python3 vavi.py --help`):
+Flags (`python3 sundew.py --help`):
 
 | flag | effect |
 |------|--------|
@@ -111,7 +111,7 @@ Flags (`python3 vavi.py --help`):
 | `--no-email` | classify and log, but never send (dry run) |
 | `--no-classify` | poll + dedup + pre-filter only; no API calls, no cost |
 | `--legacy-delivery` | temporary rollback to direct environment-list delivery |
-| `--db PATH` | override the SQLite path (default `vavi.db` next to the script) |
+| `--db PATH` | override the SQLite path (default `sundew.db` next to the script) |
 | `--app-db PATH` | override the shared settings/delivery database (default `app.db`) |
 | `--env PATH` | override the `.env` path (default next to the script) |
 
@@ -121,7 +121,7 @@ Flags (`python3 vavi.py --help`):
 > See **Command reference** below.
 
 **Cold start:** on a fresh DB the entire ~34k backlog would otherwise be
-classified. Instead Vavi marks all but the newest `COLD_START_BACKFILL`
+classified. Instead Sundew marks all but the newest `COLD_START_BACKFILL`
 (default 5) posts as already-seen, then only acts on genuinely new posts going
 forward. Tune in `config.py`.
 
@@ -140,9 +140,9 @@ operator-controlled tunnel:
 python3 settings_server.py
 ```
 
-The single page controls Vavi and Sentinel independently: enabled state,
+The single page controls Sundew and Sentinel independently: enabled state,
 categories, delivery mode, quiet hours, direction, minimum significance,
-digest time, Vavi's Kalshi section, and Sentinel update emails. It also shows
+digest time, Sundew's Kalshi section, and Sentinel update emails. It also shows
 static previews and supports a local unsubscribe. There is intentionally no
 public login/session layer in the current single-user phase; keep the listener
 on loopback or behind the same operator-only boundary used for `.env`.
@@ -181,10 +181,10 @@ country/geopolitical, company), so there is no need to index all of Kalshi
 
 **Fail-open and isolated.** All Kalshi work is wrapped and the result, including
 an empty or failed result, is cached for the event. A Kalshi outage simply sends
-the normal Vavi email without the section.
+the normal Sundew email without the section.
 
 **Recipient migration.** See the three legacy lists (`EMAIL_TO`,
-`EMAIL_TO_VAVI`, `EMAIL_TO_KS`) under [Install](#install). They select the
+`EMAIL_TO_SUNDEW`, `EMAIL_TO_KS`) under [Install](#install). They select the
 initial preferences only. After seeding, the UI and `app.db` are authoritative.
 
 **Tuning (`config.py`).** `KS_ENABLED` (master switch), `KS_MAX_MARKETS` (3),
@@ -212,7 +212,7 @@ changes, and the dedup databases sit on the instance's EBS volume.
   on-demand.
 - **AMI:** Amazon Linux 2023 (ships Python 3.9+ and systemd; the app is
   stdlib-only, so there's no `pip` step). Ubuntu works too.
-- **Storage:** the default gp3 root volume is fine — `vavi.db`, `sentinel.db`,
+- **Storage:** the default gp3 root volume is fine — `sundew.db`, `sentinel.db`,
   and `app.db` live on it and survive stop/start and reboot. **Don't
   terminate the instance** without copying the DBs off first; take an
   occasional EBS snapshot if you want to keep the history.
@@ -230,16 +230,16 @@ Gmail SMTP submission — use 587, not 25, which AWS throttles.
 ```bash
 # on the instance (user 'ec2-user' on Amazon Linux):
 sudo dnf install -y git             # or rsync the code up from your Mac instead
-git clone <your-repo> ~/vavi && cd ~/vavi
+git clone <your-repo> ~/sundew && cd ~/sundew
 cp .env.example .env                # then fill in the keys
 
-sudo cp vavi.service sentinel.service delivery.service settings.service /etc/systemd/system/
+sudo cp sundew.service sentinel.service delivery.service settings.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now vavi sentinel delivery settings
-journalctl -u vavi -u sentinel -u delivery -u settings -f
+sudo systemctl enable --now sundew sentinel delivery settings
+journalctl -u sundew -u sentinel -u delivery -u settings -f
 ```
 
-The bundled units already target `User=ec2-user` and `/home/ec2-user/vavi`;
+The bundled units already target `User=ec2-user` and `/home/ec2-user/sundew`;
 edit them if you install elsewhere. They auto-restart on crash and start on
 boot, so the instance recovers on its own after a stop or a maintenance reboot.
 
@@ -247,19 +247,19 @@ boot, so the instance recovers on its own after a stop or a maintenance reboot.
 idempotent, so a 2-minute schedule is safe:
 
 ```cron
-*/2 * * * * cd /home/ec2-user/vavi && /usr/bin/python3 vavi.py --once >> vavi.log 2>&1
+*/2 * * * * cd /home/ec2-user/sundew && /usr/bin/python3 sundew.py --once >> sundew.log 2>&1
 ```
 
 **Don't simplify the bulk insert.** SQLite runs in WAL mode with batched
 writes on purpose — per-row commits fsync on every row and can hang the
 ~34k-row cold start for minutes. Keep the batched insert.
 
-The master copy of the code stays at `/Users/avi/vavi`; deploy it to the
+The master copy of the code stays at `/Users/avi/sundew`; deploy it to the
 instance and restart the units (see **Update the code** below).
 
 ## Command reference — services
 
-Four services run side by side: **`vavi`** (Trump posts), **`sentinel`**
+Four services run side by side: **`sundew`** (Trump posts), **`sentinel`**
 (unscheduled events), **`delivery`** (shared outbound worker), and **`settings`**
 (loopback UI/API). They share one `.env` and folder; only the two monitors poll
 external sources.
@@ -269,7 +269,7 @@ external sources.
 1. **`cd` into the project directory before running anything by hand.** The
    scripts aren't in your home directory.
 2. **systemd is already running the forever-loops.** Never launch a bare
-   `python3 vavi.py` / `python3 sentinel.py` — you would get a second instance
+   `python3 sundew.py` / `python3 sentinel.py` — you would get a second instance
    polling, emailing, and writing the same database in parallel. Manual passes
    always take `--once --no-email`.
 
@@ -280,11 +280,11 @@ Every command takes one or more unit names.
 Run these on the host (or wrap them in your SSH invocation):
 
 ```bash
-systemctl is-active vavi sentinel delivery settings
-systemctl status vavi sentinel delivery settings
-sudo systemctl stop vavi sentinel delivery settings
-sudo systemctl start vavi sentinel delivery settings
-sudo systemctl restart vavi sentinel delivery settings
+systemctl is-active sundew sentinel delivery settings
+systemctl status sundew sentinel delivery settings
+sudo systemctl stop sundew sentinel delivery settings
+sudo systemctl start sundew sentinel delivery settings
+sudo systemctl restart sundew sentinel delivery settings
 sudo systemctl disable --now sentinel  # off, and stays off after reboot
 sudo systemctl enable --now sentinel   # on, auto-start at boot
 ```
@@ -292,12 +292,12 @@ sudo systemctl enable --now sentinel   # on, auto-start at boot
 ### Watching them work
 
 ```bash
-journalctl -u vavi -f                  # live Vavi log (Ctrl-C stops watching, not the service)
+journalctl -u sundew -f                  # live Sundew log (Ctrl-C stops watching, not the service)
 journalctl -u sentinel -f              # live Sentinel log
 journalctl -u delivery -f              # sends, digests, retries, Kalshi cache
 journalctl -u settings -f              # settings API requests
 journalctl -u sentinel --no-pager -n 50        # last 50 lines, no follow
-journalctl -u vavi --since "1 hour ago"        # time-bounded
+journalctl -u sundew --since "1 hour ago"        # time-bounded
 journalctl -u sentinel -p err --no-pager       # errors only
 journalctl -u delivery | grep "delivered"      # immediate deliveries
 ```
@@ -305,8 +305,8 @@ journalctl -u delivery | grep "delivered"      # immediate deliveries
 ### Manual passes (safe alongside the running services)
 
 ```bash
-cd ~/vavi
-python3 vavi.py --once --no-email        # Vavi: one pass, no send
+cd ~/sundew
+python3 sundew.py --once --no-email        # Sundew: one pass, no send
 python3 sentinel.py --once --no-email    # Sentinel: one pass, no send
 python3 sentinel.py --once --no-email --no-llm --source edgar   # cheapest possible check
 python3 sentinel.py --digest-now         # send the pending digest now
@@ -325,8 +325,8 @@ fires.)
 ### Health check (one paste)
 
 ```bash
-systemctl is-active vavi sentinel delivery settings
-journalctl -u vavi --no-pager -n 2 -o cat
+systemctl is-active sundew sentinel delivery settings
+journalctl -u sundew --no-pager -n 2 -o cat
 journalctl -u sentinel --no-pager -n 2 -o cat
 journalctl -u delivery --no-pager -n 2 -o cat
 free -m | head -2; df -h / | tail -1
@@ -338,24 +338,24 @@ journaling protects both databases across an unclean shutdown, but a clean
 
 ### Update the code
 
-Edit files in the master copy (`/Users/avi/vavi`), then get them onto the
+Edit files in the master copy (`/Users/avi/sundew`), then get them onto the
 instance and restart. If you cloned the repo on the box, `git pull` on it
 (works over SSM Session Manager, no SSH port needed). To push straight from the
 Mac over SSH instead:
 
 ```bash
 rsync -a --exclude '__pycache__' --exclude '*.db*' \
-  /Users/avi/vavi/ ec2-user@<instance>:~/vavi/
-ssh ec2-user@<instance> sudo systemctl restart vavi sentinel delivery settings
+  /Users/avi/sundew/ ec2-user@<instance>:~/sundew/
+ssh ec2-user@<instance> sudo systemctl restart sundew sentinel delivery settings
 ```
 
 (`--exclude '*.db*'` matters: never overwrite the instance's dedup databases.)
 Restart only the service whose code you touched if you prefer — editing
-`config.py` affects `vavi`, `sentinel_*.py` affects `sentinel`.
+`config.py` affects `sundew`, `sentinel_*.py` affects `sentinel`.
 
 ## Storage
 
-`vavi.db` (SQLite) holds two tables:
+`sundew.db` (SQLite) holds two tables:
 
 - `seen` — dedup state (post_id, content_hash) so reposts/re-fetches don't
   re-notify.
@@ -382,7 +382,7 @@ triages for a human; it does not predict prices or trade.
 
 Files: `sentinel.py` (orchestrator), `sentinel_sources.py` (fetchers),
 `sentinel_cluster.py` (SimHash clustering + scoring), `sentinel_config.py`
-(ALL tunables), `sentinel.service` (systemd). Shares `.env` with Vavi;
+(ALL tunables), `sentinel.service` (systemd). Shares `.env` with Sundew;
 own database `sentinel.db`.
 
 ## Pipeline
@@ -476,11 +476,11 @@ dates: `INSERT INTO calendar VALUES ('TICKER:XYZ','2026-08-15','8-K:2.02','earni
 
 ## Run / test
 
-Same rule as Vavi: `cd ~/vavi` first, and never start a second copy by hand
+Same rule as Sundew: `cd ~/sundew` first, and never start a second copy by hand
 while the systemd service is running.
 
 ```bash
-cd ~/vavi
+cd ~/sundew
 
 python3 sentinel.py --once --no-email --no-llm        # ingestion only, no API calls
 python3 sentinel.py --once --no-email                 # + LLM adjudication, dry run
@@ -500,7 +500,7 @@ Flags (`python3 sentinel.py --help`):
 | `--source NAME` | poll only one source: `edgar`, `nasdaq_halts`, `nyse_halts` |
 | `--digest-now` | send the queued medium-tier digest immediately, then exit |
 | `--db PATH` | override the SQLite path (default `sentinel.db`) |
-| `--env PATH` | override the `.env` path (shared with Vavi) |
+| `--env PATH` | override the `.env` path (shared with Sundew) |
 
 **Cold start:** the first run on an empty DB ingests the whole backlog
 *silently* — clusters are built and scored, but no email is sent and the
@@ -532,7 +532,7 @@ journalctl -u sentinel -f
 Useful inspection queries:
 
 ```bash
-cd ~/vavi
+cd ~/sundew
 # what got emailed today, highest impact first
 sqlite3 sentinel.db "SELECT cluster_id,event_type,impact,novelty,title FROM clusters
   WHERE alerted_at IS NOT NULL ORDER BY impact DESC LIMIT 20;"

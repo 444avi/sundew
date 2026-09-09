@@ -18,11 +18,11 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import sesmail
 
 
-MONITORS = {"vavi", "sentinel"}
+MONITORS = {"sundew", "sentinel"}
 CATEGORIES = {"company", "commodity", "country", "macro"}
 DIRECTIONS = {"bullish", "bearish", "unclear"}
 SIGNIFICANCE = {"low": 0, "medium": 1, "high": 2}
-DELIVERY_MODES = {"vavi": {"immediate", "digest"},
+DELIVERY_MODES = {"sundew": {"immediate", "digest"},
                   "sentinel": {"immediate", "smart", "digest"}}
 TIME_RE = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 DEFAULT_SENTINEL_MARKET_CAP_USD = 1_000_000_000
@@ -102,7 +102,7 @@ def next_digest_at(now, timezone_name, digest_time_local):
     return candidate.astimezone(timezone.utc)
 
 
-def vavi_categories(classification):
+def sundew_categories(classification):
     labels = set()
     category = (classification.get("category") or "").lower()
     if category == "company":
@@ -165,7 +165,7 @@ class AppStore:
         CREATE TABLE IF NOT EXISTS notification_preferences (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            monitor TEXT NOT NULL CHECK(monitor IN ('vavi','sentinel')),
+            monitor TEXT NOT NULL CHECK(monitor IN ('sundew','sentinel')),
             enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)),
             delivery_mode TEXT NOT NULL
                 CHECK(delivery_mode IN ('immediate','smart','digest')),
@@ -194,7 +194,7 @@ class AppStore:
             updated_at TEXT NOT NULL,
             UNIQUE(user_id, monitor),
             CHECK(monitor = 'sentinel' OR delivery_mode != 'smart'),
-            CHECK(monitor = 'vavi' OR kalshi_enabled = 0),
+            CHECK(monitor = 'sundew' OR kalshi_enabled = 0),
             CHECK(monitor = 'sentinel' OR update_emails_enabled = 0)
         );
 
@@ -216,7 +216,7 @@ class AppStore:
 
         CREATE TABLE IF NOT EXISTS notification_events (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            monitor TEXT NOT NULL CHECK(monitor IN ('vavi','sentinel')),
+            monitor TEXT NOT NULL CHECK(monitor IN ('sundew','sentinel')),
             source_event_id TEXT NOT NULL,
             event_version INTEGER NOT NULL CHECK(event_version >= 1),
             event_kind TEXT NOT NULL CHECK(event_kind IN ('original','update')),
@@ -278,7 +278,7 @@ class AppStore:
                            digest_time="17:00",
                            minimum_market_cap_usd=DEFAULT_SENTINEL_MARKET_CAP_USD):
         now = iso_utc()
-        mode = "immediate" if monitor == "vavi" else "smart"
+        mode = "immediate" if monitor == "sundew" else "smart"
         updates = 1 if monitor == "sentinel" else 0
         self.conn.execute(
             """INSERT OR IGNORE INTO notification_preferences
@@ -312,7 +312,7 @@ class AppStore:
         """Idempotently migrate legacy lists into verified active users."""
         validate_timezone(default_timezone)
         sentinel = set(parse_recipients(env.get("EMAIL_TO")))
-        plain = set(parse_recipients(env.get("EMAIL_TO_VAVI")))
+        plain = set(parse_recipients(env.get("EMAIL_TO_SUNDEW")))
         if not plain:
             plain = set(sentinel)
         kalshi_users = set(parse_recipients(env.get("EMAIL_TO_KS")))
@@ -332,7 +332,7 @@ class AppStore:
                                             digest_time=sentinel_digest_time,
                                             minimum_market_cap_usd=sentinel_market_cap_floor)
                 if email in plain or email in kalshi_users:
-                    self._ensure_preference(user["id"], "vavi",
+                    self._ensure_preference(user["id"], "sundew",
                                             kalshi=email in kalshi_users)
             self.conn.commit()
         except Exception:
@@ -357,7 +357,7 @@ class AppStore:
         pref["directions"] = [r[0] for r in self.conn.execute(
             "SELECT direction FROM preference_directions WHERE preference_id=? ORDER BY direction",
             (pref_id,))]
-        if pref["monitor"] == "vavi":
+        if pref["monitor"] == "sundew":
             pref.pop("update_emails_enabled", None)
             pref.pop("minimum_market_cap_usd", None)
         else:
@@ -413,7 +413,7 @@ class AppStore:
         shared = {"enabled", "delivery_mode", "minimum_significance",
                   "quiet_hours_enabled", "quiet_start_local", "quiet_end_local",
                   "digest_time_local", "categories", "directions", "timezone"}
-        applicable = shared | ({"kalshi_enabled"} if monitor == "vavi"
+        applicable = shared | ({"kalshi_enabled"} if monitor == "sundew"
                                else {"update_emails_enabled",
                                      "minimum_market_cap_usd"})
         errors = {}
@@ -436,7 +436,7 @@ class AppStore:
         for key in ("enabled", "quiet_hours_enabled"):
             if not isinstance(proposed.get(key), bool):
                 errors[key] = "Choose on or off."
-        monitor_flag = "kalshi_enabled" if monitor == "vavi" else "update_emails_enabled"
+        monitor_flag = "kalshi_enabled" if monitor == "sundew" else "update_emails_enabled"
         if not isinstance(proposed.get(monitor_flag), bool):
             errors[monitor_flag] = "Choose on or off."
         if proposed.get("delivery_mode") not in DELIVERY_MODES[monitor]:
@@ -858,12 +858,12 @@ class DeliveryWorker:
             "No real event occurred and no delivery preferences were changed.",
         ])
         digest = hashlib.sha256(to.encode()).hexdigest()[:12]
-        message_id = f"<test-{monitor}-{digest}-{int(utcnow().timestamp())}@notifications.vavi>"
+        message_id = f"<test-{monitor}-{digest}-{int(utcnow().timestamp())}@notifications.sundew>"
         self._send(to, subject, body, message_id)
         return {"status": "sent", "to": to, "monitor": monitor}
 
     def _kalshi_value(self, row):
-        if row["monitor"] != "vavi" or not row["kalshi_enabled"]:
+        if row["monitor"] != "sundew" or not row["kalshi_enabled"]:
             return {"status": "ready", "markets": []}
         if row["kalshi_data"]:
             value = json.loads(row["kalshi_data"])
@@ -899,7 +899,7 @@ class DeliveryWorker:
     @staticmethod
     def _message_id(kind, monitor, user_id, identity):
         digest = hashlib.sha256(str(identity).encode()).hexdigest()[:20]
-        return f"<{kind}-{monitor}-{user_id}-{digest}@notifications.vavi>"
+        return f"<{kind}-{monitor}-{user_id}-{digest}@notifications.sundew>"
 
     def process_immediate(self, monitor=None, event_id=None):
         sent = 0
@@ -988,10 +988,10 @@ class DeliveryWorker:
 
 
 def static_preview(monitor):
-    if monitor == "vavi":
+    if monitor == "sundew":
         return {
-            "eyebrow": "VAVI / TARIFF · HIGH",
-            "subject": "Vavi 🔴 [TARIFF/HIGH] NVDA, TSM",
+            "eyebrow": "SUNDEW / TARIFF · HIGH",
+            "subject": "Sundew 🔴 [TARIFF/HIGH] NVDA, TSM",
             "headline": "New semiconductor tariff announced",
             "summary": "A market-relevant post names chip imports and a new tariff timetable.",
             "meta": ["Direction · Bearish", "Category · Company + Macro", "Confidence · 0.91"],
@@ -1004,4 +1004,4 @@ def static_preview(monitor):
             "summary": "An 8-K reports an immediate CFO departure; the event cleared global impact and novelty gates.",
             "meta": ["Direction · Bearish", "Category · Company", "Impact · 0.78"],
         }
-    raise ValidationError({"monitor": "Choose Vavi or Sentinel."})
+    raise ValidationError({"monitor": "Choose Sundew or Sentinel."})
