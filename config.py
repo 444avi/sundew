@@ -16,8 +16,8 @@ Pure data, no logic. Edit freely.
 ARCHIVE_URL = "https://ix.cnn.io/data/truth-social/truth_archive.json"
 
 # How often the forever-loop polls, in seconds. The archive only refreshes
-# ~every 5 min, so anything under ~120s just re-fetches the same bytes.
-POLL_INTERVAL_SECONDS = 120
+# ~every 5 min, so polling faster than that just re-fetches the same bytes.
+POLL_INTERVAL_SECONDS = 300
 
 # Network timeout for the archive fetch and API calls.
 HTTP_TIMEOUT_SECONDS = 30

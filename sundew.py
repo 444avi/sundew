@@ -16,6 +16,7 @@ for dry runs. Stdlib only; secrets come from .env. See README.md.
 """
 
 import argparse
+import gzip
 import hashlib
 import html
 import json
@@ -90,14 +91,56 @@ def normalize(raw):
     }
 
 
+class ArchiveUnchanged(Exception):
+    """The archive answered 304 Not Modified: nothing to do this pass. Raised
+    (rather than returning []) so it can never be mistaken for an empty
+    archive."""
+
+
+# url -> (etag, last_modified) from the last fully parsed 200. In memory only:
+# after a restart the first poll is one full fetch.
+_validators = {}
+
+
 def fetch_posts(url=config.ARCHIVE_URL, timeout=config.HTTP_TIMEOUT_SECONDS):
-    """Fetch and parse the archive. Returns posts newest-first (as served)."""
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        data = json.load(resp)
+    """Fetch and parse the archive. Returns posts newest-first (as served).
+
+    Asks for gzip (the 20 MB archive is ~5 MB compressed) and makes a
+    conditional request with the validators from the last good fetch. Raises
+    ArchiveUnchanged on a 304."""
+    headers = {"User-Agent": USER_AGENT, "Accept-Encoding": "gzip"}
+    etag, last_modified = _validators.get(url, (None, None))
+    if etag:
+        headers["If-None-Match"] = etag
+    if last_modified:
+        headers["If-Modified-Since"] = last_modified
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read()
+            encoding = (resp.headers.get("Content-Encoding") or "").strip().lower()
+            new_validators = (resp.headers.get("ETag"),
+                              resp.headers.get("Last-Modified"))
+    except urllib.error.HTTPError as e:
+        if e.code == 304:
+            e.close()
+            raise ArchiveUnchanged() from None
+        raise
+    wire_bytes = len(body)
+    # urllib does not decompress; the server may also ignore Accept-Encoding.
+    if encoding in ("gzip", "x-gzip"):
+        body = gzip.decompress(body)
+    elif encoding not in ("", "identity"):
+        raise ValueError(f"unexpected Content-Encoding: {encoding!r}")
+    data = json.loads(body)
     if not isinstance(data, list):
         raise ValueError(f"expected a JSON list, got {type(data).__name__}")
-    return [normalize(r) for r in data]
+    posts = [normalize(r) for r in data]
+    # Only now, with the whole body read and parsed, trust the new validators.
+    _validators[url] = new_validators
+    log(f"archive: HTTP 200, {wire_bytes:,} bytes on the wire "
+        f"({encoding or 'uncompressed'}), {len(body):,} decoded")
+    return posts
 
 
 # ---------------------------------------------------------------------------
@@ -454,7 +497,11 @@ def cold_start_backfill(store, posts):
 def run_once(store, env, no_email=False, classify_enabled=True, app_store=None):
     """One full pass. Idempotent: already-seen posts are skipped, so running
     twice is a no-op for the second run."""
-    posts = fetch_posts()
+    try:
+        posts = fetch_posts()
+    except ArchiveUnchanged:
+        log("archive unchanged: HTTP 304, 0 body bytes on the wire; skipping pass")
+        return 0
     log(f"fetched {len(posts)} posts")
 
     # Whether to also send the Kalshi-augmented copy. Kalshi markets are
