@@ -41,6 +41,76 @@ function showToast(message, error = false) {
 
 function titled(value) { return value.charAt(0).toUpperCase() + value.slice(1); }
 
+// Only parse a body as JSON when the server says it is JSON. A redirect or an
+// HTML error page must never be fed to JSON.parse.
+async function readBody(response) {
+  const type = response.headers.get("Content-Type") || "";
+  if (type.includes("application/json")) {
+    try { return await response.json(); } catch (_) { return {}; }
+  }
+  return {};
+}
+
+// Central handling for the two auth outcomes an API can return. Returns true
+// when it has taken over the response so the caller should stop.
+function handleAuthFailure(response, data) {
+  if (response.status === 401 && data && data.auth_url) {
+    window.location.assign(data.auth_url);  // send the browser to central login
+    return true;
+  }
+  if (response.status === 403 && data && data.error === "plan_required") {
+    showPremiumRequired(data);
+    return true;
+  }
+  return false;
+}
+
+function showPremiumRequired(data) {
+  const cta = document.querySelector("#premium-cta");
+  if (data && data.account_url && cta) cta.href = data.account_url;
+  if (data && data.plan) {
+    document.querySelector("#premium-detail").textContent =
+      `Your Arboretum plan is ${titled(data.plan)}. Upgrade to Premium or Max ` +
+      "to manage Sundew and Sentinel delivery.";
+  }
+  document.querySelector("#premium-required").classList.remove("is-hidden");
+  document.querySelector("#settings-root").classList.add("is-hidden");
+  document.querySelector("#subscription").classList.add("is-hidden");
+  document.querySelector("#not-recipient").classList.add("is-hidden");
+  document.querySelector("#admin-bar").classList.add("is-hidden");
+}
+
+function renderAccount(data) {
+  // Plan badge in the dark account bar.
+  const badge = document.querySelector("#plan-badge");
+  if (data.plan) {
+    badge.textContent = titled(data.plan);
+    badge.dataset.plan = data.plan;
+    badge.classList.remove("is-hidden");
+  } else {
+    badge.classList.add("is-hidden");
+  }
+  // Header identity: always the signed-in caller (an admin keeps their own
+  // identity in the header while viewing another recipient below).
+  const headerEmail = document.querySelector("#header-email");
+  if (headerEmail) headerEmail.textContent = data.identity || (data.user && data.user.email) || "—";
+  const headerPlan = document.querySelector("#header-plan");
+  if (headerPlan && data.plan) {
+    headerPlan.textContent = titled(data.plan);
+    headerPlan.dataset.plan = data.plan;
+    headerPlan.classList.remove("is-hidden");
+  } else if (headerPlan) {
+    headerPlan.classList.add("is-hidden");
+  }
+  // Account + Log out links, kept in sync wherever they appear.
+  if (data.account_url) {
+    document.querySelectorAll("[data-account-link]").forEach(a => { a.href = data.account_url; });
+  }
+  if (data.logout_url) {
+    document.querySelectorAll("[data-logout-link]").forEach(a => { a.href = data.logout_url; });
+  }
+}
+
 function formatMarketCap(value) {
   if (value >= 1e12) return `$${value / 1e12}T`;
   return `$${value / 1e9}B`;
@@ -174,10 +244,11 @@ async function saveMonitor(event, card) {
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify(payloadFor(card)),
     });
-    const data = await response.json();
+    const data = await readBody(response);
+    if (handleAuthFailure(response, data)) return;
     if (!response.ok) {
       renderErrors(card, data.fields);
-      throw new Error("Review the highlighted settings.");
+      throw new Error(data.message || "Review the highlighted settings.");
     }
     renderPreference(card.dataset.monitor, data.preference);
     status.textContent = "Saved ✓";
@@ -225,8 +296,11 @@ async function loadSettings(userEmail) {
     const response = await fetch(
       userEmail ? `/api/settings?user=${encodeURIComponent(userEmail)}` : "/api/settings",
       {headers: {"Accept": "application/json"}});
-    const data = await response.json();
+    const data = await readBody(response);
+    if (handleAuthFailure(response, data)) return;
     if (!response.ok) throw new Error(data.message || "Could not load settings.");
+    document.querySelector("#premium-required").classList.add("is-hidden");
+    renderAccount(data);
     isAdmin = !!data.is_admin;
     renderAdmin(data);
     if (!data.user) {  // authenticated, but no recipient row to edit
@@ -268,7 +342,8 @@ async function sendTestEmail(card) {
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({monitor, user: viewing}),
     });
-    const data = await response.json();
+    const data = await readBody(response);
+    if (handleAuthFailure(response, data)) return;
     if (!response.ok) throw new Error(data.message || "Could not send test email.");
     showToast(`Test ${titled(monitor)} email sent to ${data.to}.`);
   } catch (error) {
@@ -292,7 +367,9 @@ document.querySelector("#unsubscribe").addEventListener("click", async () => {
       headers: {"Content-Type": "application/json"},
       body: "{}",
     });
-    if (!response.ok) throw new Error("Could not unsubscribe this address.");
+    const data = await readBody(response);
+    if (handleAuthFailure(response, data)) return;
+    if (!response.ok) throw new Error(data.message || "Could not unsubscribe this address.");
     document.querySelector("#subscription-status").textContent = "Unsubscribed";
     showToast("This address is now unsubscribed from all delivery.");
   } catch (error) {

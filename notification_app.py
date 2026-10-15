@@ -35,6 +35,18 @@ class ValidationError(ValueError):
         self.errors = errors
 
 
+class AccountConflict(Exception):
+    """A verified account cannot be linked without merging or reassigning.
+
+    Carries only a short, non-sensitive ``code`` (never an email or account id)
+    so the HTTP layer can fail closed without leaking who owns a colliding row.
+    """
+
+    def __init__(self, code):
+        super().__init__(code)
+        self.code = code
+
+
 def utcnow():
     return datetime.now(timezone.utc)
 
@@ -269,6 +281,22 @@ class AppStore:
         if "market_cap_usd" not in event_columns:
             self.conn.execute(
                 "ALTER TABLE notification_events ADD COLUMN market_cap_usd REAL")
+        # Arboretum central-auth link: a nullable, stable account id per user.
+        # Email stays unique for delivery, but the account id is the durable
+        # login key. A partial unique index enforces one-user-per-account while
+        # leaving legacy (unclaimed) rows free to share the NULL value.
+        user_columns = {row[1] for row in self.conn.execute(
+            "PRAGMA table_info(users)")}
+        if "arboretum_account_id" not in user_columns:
+            try:
+                self.conn.execute(
+                    "ALTER TABLE users ADD COLUMN arboretum_account_id TEXT")
+            except sqlite3.OperationalError as exc:  # concurrent starter won the race
+                if "duplicate column" not in str(exc).lower():
+                    raise
+        self.conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_arboretum_account "
+            "ON users(arboretum_account_id) WHERE arboretum_account_id IS NOT NULL")
         self.conn.commit()
 
     def close(self):
@@ -383,6 +411,108 @@ class AppStore:
         return self.conn.execute(
             "SELECT * FROM users WHERE email=? COLLATE NOCASE",
             (normalize_email(email),)).fetchone()
+
+    def get_user_by_id(self, user_id):
+        return self.conn.execute(
+            "SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+
+    def get_user_by_account(self, account_id):
+        return self.conn.execute(
+            "SELECT * FROM users WHERE arboretum_account_id=?",
+            (str(account_id),)).fetchone()
+
+    def resolve_account_user(self, account_id, email, *,
+                             default_timezone="America/Los_Angeles",
+                             sentinel_digest_time="17:00",
+                             sentinel_market_cap_floor=DEFAULT_SENTINEL_MARKET_CAP_USD):
+        """Link a cryptographically verified account to its Sundew user row.
+
+        The account id (never the email) is the durable identity. This is the
+        only place a login provisions or claims a row, and it is safe to call on
+        every authenticated request: it is idempotent and serialized so repeated
+        or concurrent first visits converge on exactly one user and one default
+        preference per monitor.
+
+        Resolution order:
+          1. Exact ``arboretum_account_id`` match -> keep its stored email current
+             (only when doing so introduces no uniqueness conflict).
+          2. Otherwise a single unclaimed legacy row with the verified email is
+             claimed for this account, preserving its id, status, timezone,
+             preferences, and delivery history untouched.
+          3. Otherwise a fresh active user is created with default Sundew and
+             Sentinel preferences.
+
+        Users are never merged and an account id is never reassigned; every
+        ambiguous or colliding case raises :class:`AccountConflict` so the caller
+        can fail closed. Subscription state (unsubscribed/disabled) and
+        verification state are preserved for existing rows so authentication can
+        never silently resubscribe or re-verify someone.
+        """
+        account_id = (str(account_id) if account_id is not None else "").strip()
+        email = normalize_email(email)
+        if not account_id:
+            raise AccountConflict("missing_account_id")
+        if not email:
+            raise AccountConflict("missing_email")
+        validate_timezone(default_timezone)
+        now = iso_utc()
+        self.conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = self.conn.execute(
+                "SELECT * FROM users WHERE arboretum_account_id=?",
+                (account_id,)).fetchone()
+            if row is not None:
+                user_id = row["id"]
+                if normalize_email(row["email"]) != email:
+                    clash = self.conn.execute(
+                        "SELECT id FROM users WHERE email=? COLLATE NOCASE AND id<>?",
+                        (email, user_id)).fetchone()
+                    if clash is not None:
+                        raise AccountConflict("email_in_use")
+                    # Keep delivery pointed at the current verified email. Do not
+                    # touch status or verification state (no silent resubscribe).
+                    self.conn.execute(
+                        "UPDATE users SET email=?, updated_at=? WHERE id=?",
+                        (email, now, user_id))
+            else:
+                matches = self.conn.execute(
+                    "SELECT * FROM users WHERE email=? COLLATE NOCASE",
+                    (email,)).fetchall()
+                if len(matches) > 1:
+                    # Should never happen (email is UNIQUE) but never guess.
+                    raise AccountConflict("ambiguous_email")
+                if matches:
+                    existing = matches[0]
+                    if existing["arboretum_account_id"] is not None:
+                        # Email already belongs to a different account: never
+                        # reassign or merge.
+                        raise AccountConflict("email_bound_to_other_account")
+                    user_id = existing["id"]
+                    # Claim in place: preserve status, timezone, prefs, history,
+                    # id, and verification state. Only the account link changes.
+                    self.conn.execute(
+                        "UPDATE users SET arboretum_account_id=?, updated_at=? WHERE id=?",
+                        (account_id, now, user_id))
+                else:
+                    cur = self.conn.execute(
+                        """INSERT INTO users
+                           (email, arboretum_account_id, email_verified_at,
+                            timezone, status, created_at, updated_at)
+                           VALUES (?,?,?,?,'active',?,?)""",
+                        (email, account_id, now, default_timezone, now, now))
+                    user_id = cur.lastrowid
+                    # A brand-new paid customer must be able to use the settings
+                    # page immediately, so seed both monitors' defaults.
+                    self._ensure_preference(user_id, "sundew")
+                    self._ensure_preference(
+                        user_id, "sentinel",
+                        digest_time=sentinel_digest_time,
+                        minimum_market_cap_usd=sentinel_market_cap_floor)
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+        return self.get_user_by_id(user_id)
 
     def list_users(self):
         return [{"email": row["email"], "status": row["status"]}

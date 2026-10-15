@@ -3,3 +3,11 @@
 # delivery through Amazon SES (see sesmail.py). On the EC2 host install with:
 #   pip install -r requirements.txt
 boto3>=1.34
+
+# First-party Arboretum customer auth for the settings service: verifies the
+# arb_session cookie, checks the plan, and builds central login redirects. It
+# holds only public verification material (no WorkOS/Stripe/DB/signing secret).
+# Vendored as a wheel for a reproducible, offline-friendly install; it pins its
+# own transitive PyJWT[crypto] (fetched from PyPI). Install from the repo root:
+#   pip install -r requirements.txt
+./vendor/arboretum_auth-0.1.2-py3-none-any.whl
