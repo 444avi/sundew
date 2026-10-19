@@ -13,9 +13,11 @@ import re
 import sqlite3
 from datetime import datetime, time, timedelta, timezone
 from email.message import EmailMessage
+from time import monotonic
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import sesmail
+import slack
 
 
 MONITORS = {"sundew", "sentinel"}
@@ -25,6 +27,8 @@ SIGNIFICANCE = {"low": 0, "medium": 1, "high": 2}
 DELIVERY_MODES = {"sundew": {"immediate", "digest"},
                   "sentinel": {"immediate", "smart", "digest"}}
 TIME_RE = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+MAX_DELIVERY_ATTEMPTS = 5  # the attempt_count < 5 cap in the delivery queries
+SLACK_OPS_THROTTLE_SECONDS = 30 * 60
 DEFAULT_SENTINEL_MARKET_CAP_USD = 1_000_000_000
 MAX_SENTINEL_MARKET_CAP_USD = 1_000_000_000_000
 
@@ -955,6 +959,32 @@ class DeliveryWorker:
         self.store = store
         self.env = env
         self.log = logger
+        self.slack_hooks = {monitor: slack.webhook_for(env, monitor) for monitor in MONITORS}
+        self._ops_posted_at = {}
+
+    def _slack_mirror(self, monitor, recipient, title, body):
+        """Mirror a delivery that is already recorded sent. Never raises."""
+        try:
+            if self.slack_hooks.get(monitor) and slack.mirror_allowed(recipient, self.env):
+                slack.post(self.slack_hooks[monitor], title, slack.plain_block(title, body))
+        except Exception as exc:  # Slack must never affect email bookkeeping
+            self.log(f"slack mirror failed: {type(exc).__name__}")
+
+    def _slack_ops(self, monitor, kind, text):
+        """Post an ops notice, at most once per monitor and kind per 30 min."""
+        hook = self.slack_hooks.get(monitor)
+        if not hook:
+            return
+        key = (monitor, kind)
+        now = monotonic()
+        last = self._ops_posted_at.get(key)
+        if last is not None and now - last < SLACK_OPS_THROTTLE_SECONDS:
+            return
+        self._ops_posted_at[key] = now
+        try:
+            slack.post(hook, text)
+        except Exception as exc:
+            self.log(f"slack ops notice failed: {type(exc).__name__}")
 
     def _links(self):
         base = self.env.get("SETTINGS_PUBLIC_URL", "http://localhost:8787").rstrip("/")
@@ -1046,6 +1076,7 @@ class DeliveryWorker:
                     f"{row['source_event_id']}:{row['event_version']}")
                 self._send(row["email"], subject, body, message_id)
                 self.store.finish_deliveries([row["delivery_id"]], True)
+                self._slack_mirror(row["monitor"], row["email"], subject, body)
                 sent += 1
                 created = datetime.fromisoformat(row["event_created_at"])
                 latency = max(0, int((utcnow() - created).total_seconds()))
@@ -1054,6 +1085,12 @@ class DeliveryWorker:
             except Exception as exc:
                 self.store.finish_deliveries([row["delivery_id"]], False, exc)
                 self.log(f"delivery failed for event {row['event_id']}: {exc}")
+                attempts = row["attempt_count"] + 1  # claim_delivery incremented it
+                if attempts >= MAX_DELIVERY_ATTEMPTS:
+                    self._slack_ops(
+                        row["monitor"], "event",
+                        f"{row['monitor'].title()}: delivery failed for event "
+                        f"{row['event_id']} after {attempts} attempts ({type(exc).__name__})")
         return sent
 
     def process_digests(self, monitor=None, force=False):
@@ -1092,19 +1129,31 @@ class DeliveryWorker:
             monitor_name = group["monitor"].title()
             subject = f"{monitor_name} digest: {len(rows)} item(s)"
             parts = [f"{monitor_name} daily digest — {len(rows)} event(s)", ""]
+            item_subjects = []
             for index, (row, enrichment) in enumerate(zip(rows, enrichments), 1):
                 item_subject, item_body = self._render_one(row, enrichment)
+                item_subjects.append(f"{index}. {item_subject}")
                 parts.extend([f"{index}. {item_subject}", "", item_body, "", "—" * 48, ""])
             try:
                 message_id = self._message_id(
                     "digest", group["monitor"], group["user_id"], group["scheduled_for"])
                 self._send(rows[0]["email"], subject, "\n".join(parts), message_id)
                 self.store.finish_deliveries(ids, True)
+                self._slack_mirror(
+                    group["monitor"], rows[0]["email"],
+                    f"{monitor_name} digest — {len(rows)} item{'' if len(rows) == 1 else 's'}",
+                    "\n".join(item_subjects))
                 sent += 1
                 self.log(f"sent {group['monitor']} digest with {len(rows)} item(s) to user {group['user_id']}")
             except Exception as exc:
                 self.store.finish_deliveries(ids, False, exc)
                 self.log(f"digest delivery failed for user {group['user_id']}: {exc}")
+                attempts = max(row["attempt_count"] for row in rows) + 1  # claim_digest incremented
+                if attempts >= MAX_DELIVERY_ATTEMPTS:
+                    self._slack_ops(
+                        group["monitor"], "digest",
+                        f"{monitor_name}: digest delivery failed for user "
+                        f"{group['user_id']} after {attempts} attempts ({type(exc).__name__})")
         return sent
 
     def run_due(self, monitor=None, event_id=None, force_digests=False):

@@ -1131,5 +1131,182 @@ class SlackSenderTests(unittest.TestCase):
         self.assertEqual(slack.plain_block("t", "short")[1]["text"]["text"], "```short```")
 
 
+class DeliveryWorkerSlackTests(unittest.TestCase):
+    publish = NotificationAppTests.publish
+    delivery = NotificationAppTests.delivery
+    PAST = datetime(2020, 9, 5, 12, tzinfo=timezone.utc)
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.store = AppStore(os.path.join(self.temp.name, "app.db"))
+        self.store.seed_from_env({"EMAIL_TO": "owner@example.com,customer@example.com"})
+        self.env = {
+            "EMAIL_FROM": "sender@example.com",
+            "SLACK_WEBHOOK_URL_SUNDEW": SUNDEW_HOOK,
+            "SLACK_WEBHOOK_URL_SENTINEL": SENTINEL_HOOK,
+            "SLACK_MIRROR_EMAILS": "Owner@example.com",
+        }
+        self.emails = []
+
+    def tearDown(self):
+        self.store.close()
+        self.temp.cleanup()
+
+    def worker(self, env=None):
+        worker = DeliveryWorker(self.store, self.env if env is None else env,
+                                logger=lambda message: None)
+        worker._send = lambda to, subject, body, message_id: self.emails.append(to)
+        return worker
+
+    def test_immediate_mirror_routes_by_monitor_for_mirrored_recipients_only(self):
+        self.publish("sundew", source_event_id="s-1", now=self.PAST,
+                     subject_data={"subject": "Sundew <TARIFF>"},
+                     body_data={"body": "Sundew body", "classification": {}})
+        self.publish("sentinel", source_event_id="n-1", now=self.PAST,
+                     subject_data={"subject": "Sentinel 8-K"},
+                     body_data={"body": "Sentinel body", "classification": {}})
+        fake = _FakeSlack()
+        with mock.patch("urllib.request.urlopen", fake):
+            self.assertEqual(self.worker().process_immediate(), 4)
+        self.assertEqual(len(self.emails), 4)
+        sundew_posts, sentinel_posts = fake.to(SUNDEW_HOOK), fake.to(SENTINEL_HOOK)
+        self.assertEqual(len(fake.posts), 2)  # the customer's copies are not mirrored
+        self.assertEqual(sundew_posts[0]["text"], "Sundew <TARIFF>")
+        self.assertEqual(sundew_posts[0]["blocks"],
+                         slack.plain_block("Sundew <TARIFF>", "Sundew body"))
+        self.assertEqual(sentinel_posts[0]["blocks"],
+                         slack.plain_block("Sentinel 8-K", "Sentinel body"))
+        self.assertNotIn("Unsubscribe", json.dumps(fake.posts))
+
+    def test_mirror_includes_kalshi_section(self):
+        self.store.close()
+        self.store = AppStore(os.path.join(self.temp.name, "kalshi.db"))
+        self.store.seed_from_env({"EMAIL_TO_KS": "owner@example.com"})
+        self.publish("sundew", now=self.PAST, body_data={
+            "body": "Sundew body", "classification": {"category": "monetary", "entities": []}})
+        fake = _FakeSlack()
+        with mock.patch("kalshi.find_markets", return_value=[{"ticker": "KXFED"}]), \
+                mock.patch("kalshi.render_section", return_value="KALSHI MARKETS"), \
+                mock.patch("urllib.request.urlopen", fake):
+            self.assertEqual(self.worker().process_immediate(), 1)
+        self.assertEqual(fake.posts[0]["payload"]["blocks"][1]["text"]["text"],
+                         "```Sundew body\nKALSHI MARKETS```")
+
+    def test_unset_mirror_list_or_webhook_posts_nothing(self):
+        self.publish("sundew", now=self.PAST)
+        fake = _FakeSlack()
+        no_mirror = {k: v for k, v in self.env.items() if k != "SLACK_MIRROR_EMAILS"}
+        with mock.patch("urllib.request.urlopen", fake):
+            self.assertEqual(self.worker(no_mirror).process_immediate(), 2)
+        self.publish("sundew", source_event_id="event-2", now=self.PAST)
+        with mock.patch("urllib.request.urlopen", fake), self.assertLogs("slack", "WARNING"):
+            bad_hook = dict(self.env, SLACK_WEBHOOK_URL_SUNDEW="https://evil.test/services/x")
+            self.assertEqual(self.worker(bad_hook).process_immediate(), 2)
+        self.assertEqual(fake.posts, [])
+
+    def test_slack_failure_leaves_delivery_sent(self):
+        event = self.publish("sundew", now=self.PAST)
+        with mock.patch("urllib.request.urlopen", _FakeSlack(ConnectionResetError())), \
+                self.assertLogs("slack", "WARNING"):
+            self.assertEqual(self.worker().process_immediate(), 2)
+        statuses = [row["status"] for row in self.store.conn.execute(
+            "SELECT status FROM deliveries WHERE event_id=?", (event["event_id"],))]
+        self.assertEqual(statuses, ["sent", "sent"])
+        with mock.patch("slack.plain_block", side_effect=RuntimeError("bug")), \
+                mock.patch("urllib.request.urlopen", _FakeSlack()):
+            self.publish("sundew", source_event_id="event-2", now=self.PAST)
+            self.assertEqual(self.worker().process_immediate(), 2)
+        self.assertEqual(self.store.conn.execute(
+            "SELECT COUNT(*) FROM deliveries WHERE status='sent'").fetchone()[0], 4)
+
+    def _due_again(self):
+        self.store.conn.execute(
+            "UPDATE deliveries SET scheduled_for='2020-01-01T00:00:00+00:00' WHERE status='failed'")
+        self.store.conn.commit()
+
+    def test_failed_email_posts_ops_notice_only_on_final_attempt(self):
+        self.store.close()
+        self.store = AppStore(os.path.join(self.temp.name, "single.db"))
+        self.store.seed_from_env({"EMAIL_TO": "owner@example.com"})
+        event = self.publish("sentinel", now=self.PAST)
+        worker = self.worker()
+
+        def refuse(*args):
+            raise ConnectionRefusedError("owner@example.com refused")
+        worker._send = refuse
+        fake = _FakeSlack()
+        with mock.patch("urllib.request.urlopen", fake):
+            for attempt in range(1, 5):
+                self.assertEqual(worker.process_immediate(), 0)
+                self.assertEqual(self.delivery(event["event_id"])["attempt_count"], attempt)
+                self.assertEqual(fake.posts, [])
+                self._due_again()
+            self.assertEqual(worker.process_immediate(), 0)
+            self._due_again()
+            self.assertEqual(worker.process_immediate(), 0)  # capped: not retried
+        self.assertEqual(self.delivery(event["event_id"])["attempt_count"], 5)
+        self.assertEqual(fake.to(SENTINEL_HOOK), [{
+            "text": f"Sentinel: delivery failed for event {event['event_id']} "
+                    "after 5 attempts (ConnectionRefusedError)"}])
+        self.assertNotIn("example.com", json.dumps(fake.posts))
+
+    def test_ops_notices_are_throttled(self):
+        for source in ("a", "b", "c"):
+            self.publish("sundew", source_event_id=source, now=self.PAST)
+        self.store.conn.execute("UPDATE deliveries SET attempt_count=4")
+        self.store.conn.commit()
+        worker = self.worker()
+
+        def refuse(*args):
+            raise OSError("down")
+        worker._send = refuse
+        fake = _FakeSlack()
+        with mock.patch("urllib.request.urlopen", fake):
+            self.assertEqual(worker.process_immediate(), 0)
+            self.assertEqual(len(fake.posts), 1)
+            worker._ops_posted_at[("sundew", "event")] -= 31 * 60
+            self.publish("sundew", source_event_id="d", now=self.PAST)
+            self.store.conn.execute("UPDATE deliveries SET attempt_count=4 WHERE status='pending'")
+            self.store.conn.commit()
+            self.assertEqual(worker.process_immediate(), 0)
+        self.assertEqual(len(fake.posts), 2)
+
+    def _digest_store(self):
+        self.store.conn.execute(
+            "UPDATE notification_preferences SET delivery_mode='digest' WHERE monitor='sundew'")
+        self.store.conn.commit()
+        for source, subject in (("a", "Sundew <one>"), ("b", "Sundew two")):
+            self.publish("sundew", source_event_id=source, now=self.PAST,
+                         subject_data={"subject": subject})
+
+    def test_digest_mirror_is_a_compact_subject_list(self):
+        self._digest_store()
+        fake = _FakeSlack()
+        with mock.patch("urllib.request.urlopen", fake):
+            self.assertEqual(self.worker().process_digests(monitor="sundew", force=True), 2)
+        self.assertEqual(fake.to(SUNDEW_HOOK), [{
+            "text": "Sundew digest — 2 items",
+            "blocks": slack.plain_block("Sundew digest — 2 items",
+                                        "1. Sundew <one>\n2. Sundew two")}])
+
+    def test_failed_digest_posts_nothing_until_final_attempt(self):
+        self._digest_store()
+        worker = self.worker()
+
+        def refuse(*args):
+            raise OSError("down")
+        worker._send = refuse
+        fake = _FakeSlack()
+        with mock.patch("urllib.request.urlopen", fake):
+            for _ in range(4):
+                self.assertEqual(worker.process_digests(monitor="sundew", force=True), 0)
+            self.assertEqual(fake.posts, [])
+            self.assertEqual(worker.process_digests(monitor="sundew", force=True), 0)
+        # Two users hit their final attempt in one pass; the throttle posts once.
+        self.assertEqual(len(fake.posts), 1)
+        self.assertRegex(fake.posts[0]["payload"]["text"],
+                         r"^Sundew: digest delivery failed for user \d+ after 5 attempts \(OSError\)$")
+
+
 if __name__ == "__main__":
     unittest.main()
