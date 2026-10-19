@@ -300,6 +300,20 @@ class NotificationAppTests(unittest.TestCase):
         self.assertEqual(sent, 2)
         self.assertEqual(sorted(recipients), ["one@example.com", "two@example.com"])
 
+    def test_failed_send_is_recorded_for_retry(self):
+        event = self.publish(now=datetime(2020, 9, 5, 12, tzinfo=timezone.utc))
+        worker = DeliveryWorker(self.store, {"EMAIL_FROM": "sender@example.com"},
+                                logger=lambda message: None)
+
+        def refuse(*args):
+            raise ConnectionError("smtp down")
+        worker._send = refuse
+        self.assertEqual(worker.process_immediate(), 0)
+        delivery = self.delivery(event["event_id"])
+        self.assertEqual(delivery["status"], "failed")
+        self.assertEqual(delivery["attempt_count"], 1)
+        self.assertEqual(delivery["last_error"], "smtp down")
+
     def test_sundew_classifies_once_then_creates_two_user_decisions(self):
         self.store.close()
         self.store = AppStore(os.path.join(self.temp.name, "sundew-app.db"))

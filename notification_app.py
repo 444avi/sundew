@@ -893,7 +893,7 @@ class AppStore:
                 "SELECT MAX(attempt_count) FROM deliveries WHERE id IN (%s)" %
                 ",".join("?" for _ in delivery_ids), delivery_ids).fetchone()[0] or 1
             delay = min(3600, 60 * (2 ** max(0, attempts - 1)))
-            values = ("failed", (error or "delivery failed")[:500],
+            values = ("failed", str(error or "delivery failed")[:500],
                       iso_utc(utcnow() + timedelta(seconds=delay)), now)
             sql_tail = "status=?,last_error=?,scheduled_for=?,updated_at=?"
         marks = ",".join("?" for _ in delivery_ids)
