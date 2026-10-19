@@ -1308,5 +1308,22 @@ class DeliveryWorkerSlackTests(unittest.TestCase):
                          r"^Sundew: digest delivery failed for user \d+ after 5 attempts \(OSError\)$")
 
 
+class DeliveryWorkerCliTests(unittest.TestCase):
+    def test_test_slack_posts_to_the_monitor_channel(self):
+        import delivery_worker
+        fake = _FakeSlack()
+        with mock.patch.dict(os.environ, {"SLACK_WEBHOOK_URL_SENTINEL": SENTINEL_HOOK}), \
+                mock.patch("urllib.request.urlopen", fake), \
+                mock.patch("delivery_worker.log"):
+            self.assertEqual(delivery_worker.main(
+                ["--test-slack", "sentinel", "--env", os.devnull]), 0)
+        self.assertEqual(len(fake.to(SENTINEL_HOOK)), 1)
+        self.assertTrue(fake.posts[0]["payload"]["text"].startswith("[TEST] Sentinel"))
+        with mock.patch.dict(os.environ, {"SLACK_WEBHOOK_URL_SUNDEW": ""}), \
+                mock.patch("delivery_worker.log"):
+            self.assertEqual(delivery_worker.main(
+                ["--test-slack", "sundew", "--env", os.devnull]), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

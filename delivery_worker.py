@@ -3,12 +3,14 @@
 
 import argparse
 import os
+import socket
 import sys
 import time
 
 import sentinel_config as sentinel_cfg
+import slack
 import sundew
-from notification_app import AppStore, DeliveryWorker
+from notification_app import AppStore, DeliveryWorker, static_preview
 
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -17,6 +19,29 @@ DEFAULT_APP_DB = os.path.join(HERE, "app.db")
 
 def log(message):
     print(f"[delivery] {message}", flush=True)
+
+
+def test_slack(env, monitor):
+    """Post a labeled test message to one monitor's channel."""
+    variable = slack.MONITOR_WEBHOOKS[monitor]
+    hook = slack.webhook_for(env, monitor)
+    if not hook:
+        log(f"ERROR: {variable} is unset or not a {slack.HOOK_PREFIX} URL")
+        return 2
+    preview = static_preview(monitor)
+    title = "[TEST] " + preview["subject"]
+    body = "\n".join([
+        preview["eyebrow"], "",
+        preview["headline"], "",
+        preview["summary"], "",
+        f"Slack test from delivery_worker.py on {socket.gethostname()}. "
+        "No real event occurred.",
+    ])
+    if slack.post(hook, title, slack.plain_block(title, body)):
+        log(f"slack test accepted for {monitor}")
+        return 0
+    log(f"ERROR: slack test rejected for {monitor} (see warning above)")
+    return 1
 
 
 def main(argv=None):
@@ -31,10 +56,14 @@ def main(argv=None):
                         help="seconds between delivery scans")
     parser.add_argument("--app-db", default=DEFAULT_APP_DB)
     parser.add_argument("--env", default=os.path.join(HERE, ".env"))
+    parser.add_argument("--test-slack", choices=("sundew", "sentinel"),
+                        help="post a test message to that monitor's Slack channel and exit")
     args = parser.parse_args(argv)
 
     sundew.load_env(args.env)
     env = dict(os.environ)
+    if args.test_slack:
+        return test_slack(env, args.test_slack)
     missing = [key for key in ("EMAIL_FROM",) if not env.get(key)]
     if missing:
         log(f"ERROR: missing {', '.join(missing)}")
