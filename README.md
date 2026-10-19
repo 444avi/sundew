@@ -67,6 +67,9 @@ cp .env.example .env      # then fill in your keys (see below)
 - `EMAIL_FROM`, `SMTP_PASSWORD` (+ optional `SMTP_HOST`, `SMTP_PORT`,
   `SMTP_USER`) — required unless you run `--no-email`. Defaults target Gmail; for
   Gmail use a **16-char App Password**, not your account password.
+- `SLACK_WEBHOOK_URL_SUNDEW`, `SLACK_WEBHOOK_URL_SENTINEL`, `SLACK_MIRROR_EMAILS`
+  — optional Slack channel posts from `delivery_worker.py` (see
+  [Slack](#slack)). Unset ⇒ no Slack traffic.
 - **Legacy recipient lists** (each may be a comma-separated list of addresses):
   - `EMAIL_TO` — the shared **"everyone"** list. **Sentinel** emails it, and
     plain Sundew **falls back** to it when `EMAIL_TO_SUNDEW` is unset.
@@ -153,6 +156,27 @@ records. Settings apply only when a new canonical event is created; changing a
 setting never replays history. `delivery_worker.py` is the single shared process
 for immediate work, retries, once-per-event Kalshi enrichment, and timezone-aware
 digests; the monitor processes never do per-user network work.
+
+## Slack
+
+`delivery_worker.py` can also post to the `#sundew` and `#sentinel` Slack
+channels through one incoming webhook each (`SLACK_WEBHOOK_URL_SUNDEW`,
+`SLACK_WEBHOOK_URL_SENTINEL`; routed by the event's monitor). Two kinds of post:
+
+- **Mirrors** — a copy of an immediate notification (same text, Kalshi section
+  included, no manage/unsubscribe links) or a one-line-per-item digest summary,
+  **only** when the recipient is listed in `SLACK_MIRROR_EMAILS` (the operator's
+  own addresses; unset mirrors nothing).
+- **Ops notices** — a delivery that failed its final (5th) attempt, e.g.
+  `Sentinel: delivery failed for event 1234 after 5 attempts (SMTPException)`.
+  Ids and exception type names only; at most one per monitor and kind every 30
+  minutes.
+
+Email stays the system of record: a Slack post happens only after the delivery
+is recorded `sent`, a Slack failure is logged and swallowed, and a retried email
+never posts twice. Only `https://hooks.slack.com/services/` URLs are accepted,
+and the URL is never logged. Check a deploy with
+`python3 delivery_worker.py --test-slack sundew` (or `sentinel`).
 
 ## Kalshi email content
 
@@ -312,6 +336,7 @@ python3 sentinel.py --once --no-email --no-llm --source edgar   # cheapest possi
 python3 sentinel.py --digest-now         # send the pending digest now
 python3 delivery_worker.py --once        # process currently due work once
 python3 delivery_worker.py --force-digests  # flush all non-empty due/future groups
+python3 delivery_worker.py --test-slack sundew  # post a test message to #sundew
 ```
 
 These are safe because both databases dedup: anything the service already
