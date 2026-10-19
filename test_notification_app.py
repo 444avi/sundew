@@ -1,10 +1,12 @@
 import http.client
+import io
 import json
 import os
 import tempfile
 import threading
 import time
 import unittest
+import urllib.error
 from datetime import datetime, timezone
 from unittest import mock
 
@@ -15,6 +17,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 import sentinel
 import settings_auth
 import settings_server
+import slack
 import sundew
 from arboretum_auth import AuthConfig, VerificationUnavailable
 from notification_app import (
@@ -1010,6 +1013,122 @@ class _AlwaysUnavailable:
 
     def verify(self, token):
         raise VerificationUnavailable("jwks unreachable")
+
+
+# ---------------------------------------------------------------------------
+# Slack (Level 1). urlopen is always patched: no test touches the network.
+# ---------------------------------------------------------------------------
+SUNDEW_HOOK = "https://hooks.slack.com/services/T000/B000/sundewsecret"
+SENTINEL_HOOK = "https://hooks.slack.com/services/T000/B001/sentinelsecret"
+
+
+class _SlackReply:
+    def __init__(self, status=200, body=b"ok"):
+        self.status = status
+        self._body = body
+
+    def read(self, size=-1):
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+class _FakeSlack:
+    """Stands in for urllib.request.urlopen and records each post."""
+
+    def __init__(self, error=None):
+        self.posts = []
+        self.error = error
+
+    def __call__(self, request, timeout=None):
+        self.posts.append({"url": request.full_url, "timeout": timeout,
+                           "payload": json.loads(request.data)})
+        if self.error is not None:
+            raise self.error
+        return _SlackReply()
+
+    def to(self, url):
+        return [post["payload"] for post in self.posts if post["url"] == url]
+
+
+class SlackSenderTests(unittest.TestCase):
+    def test_only_slack_webhook_urls_are_accepted(self):
+        self.assertEqual(slack.webhook_from_env("HOOK", {"HOOK": f"  {SUNDEW_HOOK}\n"}),
+                         SUNDEW_HOOK)
+        self.assertIsNone(slack.webhook_from_env("HOOK", {}))
+        self.assertIsNone(slack.webhook_from_env("HOOK", {"HOOK": ""}))
+        for bad in ("http://hooks.slack.com/services/T/B/x",
+                    "https://hooks.slack.com.evil.test/services/T/B/x",
+                    "https://evil.test/?https://hooks.slack.com/services/"):
+            with self.assertLogs("slack", "WARNING") as logs:
+                self.assertIsNone(slack.webhook_from_env("HOOK", {"HOOK": bad}))
+            self.assertIn("HOOK", logs.output[0])
+            self.assertNotIn(bad, logs.output[0])
+
+    def test_webhook_for_routes_by_monitor(self):
+        env = {"SLACK_WEBHOOK_URL_SUNDEW": SUNDEW_HOOK,
+               "SLACK_WEBHOOK_URL_SENTINEL": SENTINEL_HOOK}
+        self.assertEqual(slack.webhook_for(env, "sundew"), SUNDEW_HOOK)
+        self.assertEqual(slack.webhook_for(env, "sentinel"), SENTINEL_HOOK)
+        self.assertIsNone(slack.webhook_for(env, "other"))
+        self.assertIsNone(slack.webhook_for({}, "sundew"))
+
+    def test_mirror_allowed_is_case_insensitive_and_fails_closed(self):
+        env = {"SLACK_MIRROR_EMAILS": " Owner@Example.com , ops@example.com,"}
+        self.assertTrue(slack.mirror_allowed("owner@example.COM", env))
+        self.assertTrue(slack.mirror_allowed("ops@example.com", env))
+        self.assertFalse(slack.mirror_allowed("customer@example.com", env))
+        self.assertFalse(slack.mirror_allowed("", env))
+        self.assertFalse(slack.mirror_allowed("owner@example.com", {}))
+
+    def test_unset_webhook_makes_no_request(self):
+        fake = _FakeSlack()
+        with mock.patch("urllib.request.urlopen", fake):
+            self.assertFalse(slack.post(None, "hello"))
+        self.assertEqual(fake.posts, [])
+
+    def test_post_sends_text_and_blocks(self):
+        fake = _FakeSlack()
+        blocks = slack.plain_block("Title", "Body")
+        with mock.patch("urllib.request.urlopen", fake):
+            self.assertTrue(slack.post(SUNDEW_HOOK, "Title", blocks))
+        self.assertEqual(fake.posts[0]["timeout"], 10)
+        self.assertEqual(fake.posts[0]["payload"], {"text": "Title", "blocks": blocks})
+
+    def test_failures_return_false_and_never_log_the_url(self):
+        rejected = urllib.error.HTTPError(
+            SUNDEW_HOOK, 404, "Not Found", {}, io.BytesIO(b"no_service"))
+        for error, expected in ((rejected, "no_service"),
+                                (urllib.error.URLError(f"cannot reach {SUNDEW_HOOK}"), "URLError"),
+                                (TimeoutError("timed out"), "TimeoutError")):
+            with mock.patch("urllib.request.urlopen", _FakeSlack(error)), \
+                    self.assertLogs("slack", "WARNING") as logs:
+                self.assertFalse(slack.post(SUNDEW_HOOK, "hello"))
+            self.assertIn(expected, logs.output[0])
+            self.assertNotIn("hooks.slack.com", logs.output[0])
+        with mock.patch("urllib.request.urlopen",
+                        lambda request, timeout: _SlackReply(200, b"invalid_payload")), \
+                self.assertLogs("slack", "WARNING") as logs:
+            self.assertFalse(slack.post(SUNDEW_HOOK, "hello"))
+        self.assertIn("invalid_payload", logs.output[0])
+
+    def test_escape_and_truncation(self):
+        self.assertEqual(slack.escape("a & <b> c"), "a &amp; &lt;b&gt; c")
+        title, body = slack.plain_block("<T>", "x" * 5000)
+        self.assertEqual(title["text"]["text"], "*&lt;T&gt;*")
+        text = body["text"]["text"]
+        self.assertLessEqual(len(text), slack.SECTION_LIMIT)
+        self.assertTrue(text.endswith("(truncated, full text in email)```"))
+        # An escaped entity is never cut in half at the truncation point.
+        text = slack.plain_block("t", "&" * 2000)[1]["text"]["text"]
+        kept = text[3:text.index("\n…")]
+        self.assertLessEqual(len(text), slack.SECTION_LIMIT)
+        self.assertEqual(kept, "&amp;" * (len(kept) // 5))
+        self.assertEqual(slack.plain_block("t", "short")[1]["text"]["text"], "```short```")
 
 
 if __name__ == "__main__":
