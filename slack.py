@@ -61,14 +61,6 @@ def webhook_for(env, monitor):
     return webhook_from_env(name, env) if name else None
 
 
-def mirror_allowed(recipient, env=None):
-    """True if ``recipient`` is listed in SLACK_MIRROR_EMAILS (comma-separated,
-    case-insensitive). Unset mirrors nothing."""
-    raw = (os.environ if env is None else env).get("SLACK_MIRROR_EMAILS") or ""
-    allowed = {addr.strip().lower() for addr in raw.split(",") if addr.strip()}
-    return bool(recipient) and recipient.strip().lower() in allowed
-
-
 def _emails(raw):
     return frozenset(addr.strip().lower() for addr in (raw or "").split(",") if addr.strip())
 

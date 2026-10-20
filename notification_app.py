@@ -959,20 +959,29 @@ class DeliveryWorker:
         self.store = store
         self.env = env
         self.log = logger
-        self.slack_hooks = {monitor: slack.webhook_for(env, monitor) for monitor in MONITORS}
+        self.slack_routes = {monitor: slack.load_routes(env, monitor) for monitor in MONITORS}
+        self.slack_ops_hooks = {monitor: slack.ops_webhook(env, monitor) for monitor in MONITORS}
+        for variable in slack.unknown_route_variables(env):
+            self.log(f"slack: ignoring {variable}: expected SLACK_ROUTE_SUNDEW_<NAME> "
+                     "or SLACK_ROUTE_SENTINEL_<NAME>")
         self._ops_posted_at = {}
 
     def _slack_mirror(self, monitor, recipient, title, body):
-        """Mirror a delivery that is already recorded sent. Never raises."""
+        """Mirror a delivery that is already recorded sent to every route of
+        its monitor that lists the recipient. Never raises."""
         try:
-            if self.slack_hooks.get(monitor) and slack.mirror_allowed(recipient, self.env):
-                slack.post(self.slack_hooks[monitor], title, slack.plain_block(title, body))
+            hooks = slack.webhooks_for(self.slack_routes.get(monitor, ()), recipient)
+            if hooks:
+                blocks = slack.plain_block(title, body)
+                for hook in hooks:
+                    slack.post(hook, title, blocks)
         except Exception as exc:  # Slack must never affect email bookkeeping
             self.log(f"slack mirror failed: {type(exc).__name__}")
 
     def _slack_ops(self, monitor, kind, text):
-        """Post an ops notice, at most once per monitor and kind per 30 min."""
-        hook = self.slack_hooks.get(monitor)
+        """Post an ops notice to the ops webhook only (never a client route),
+        at most once per monitor and kind per 30 min."""
+        hook = self.slack_ops_hooks.get(monitor)
         if not hook:
             return
         key = (monitor, kind)

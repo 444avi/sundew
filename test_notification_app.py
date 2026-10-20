@@ -1081,14 +1081,6 @@ class SlackSenderTests(unittest.TestCase):
         self.assertIsNone(slack.webhook_for(env, "other"))
         self.assertIsNone(slack.webhook_for({}, "sundew"))
 
-    def test_mirror_allowed_is_case_insensitive_and_fails_closed(self):
-        env = {"SLACK_MIRROR_EMAILS": " Owner@Example.com , ops@example.com,"}
-        self.assertTrue(slack.mirror_allowed("owner@example.COM", env))
-        self.assertTrue(slack.mirror_allowed("ops@example.com", env))
-        self.assertFalse(slack.mirror_allowed("customer@example.com", env))
-        self.assertFalse(slack.mirror_allowed("", env))
-        self.assertFalse(slack.mirror_allowed("owner@example.com", {}))
-
     def test_load_routes_puts_default_first_then_clients_by_name(self):
         env = {"SLACK_WEBHOOK_URL_SUNDEW": SUNDEW_HOOK,
                "SLACK_MIRROR_EMAILS": "Owner@example.com",
@@ -1397,6 +1389,121 @@ class DeliveryWorkerSlackTests(unittest.TestCase):
         self.assertRegex(fake.posts[0]["payload"]["text"],
                          r"^Sundew: digest delivery failed for user \d+ after 5 attempts \(OSError\)$")
 
+
+    # Per-client routes. ACME is a placeholder client with its own workspace.
+    def _route_store(self, *emails):
+        self.store.close()
+        self._stores = getattr(self, "_stores", 0) + 1
+        self.store = AppStore(os.path.join(self.temp.name, f"routes{self._stores}.db"))
+        self.store.seed_from_env({"EMAIL_TO": ",".join(emails)})
+
+    def _route_env(self, **extra):
+        return dict(self.env,
+                    SLACK_ROUTE_SUNDEW_ACME=f"A@acme.example.com|{ACME_HOOK}",
+                    SLACK_ROUTE_SENTINEL_ACME=f"a@acme.example.com|{ACME_SENTINEL_HOOK}",
+                    **extra)
+
+    def _publish_both(self):
+        self.publish("sundew", source_event_id="s-1", now=self.PAST,
+                     subject_data={"subject": "Sundew tariff"})
+        self.publish("sentinel", source_event_id="n-1", now=self.PAST,
+                     subject_data={"subject": "Sentinel 8-K"})
+
+    def test_client_route_gets_only_its_recipients_per_monitor(self):
+        self._route_store("owner@example.com", "a@acme.example.com", "customer@example.com")
+        self._publish_both()
+        fake = _FakeSlack()
+        with mock.patch("urllib.request.urlopen", fake):
+            self.assertEqual(self.worker(self._route_env()).process_immediate(), 6)
+        self.assertEqual(len(self.emails), 6)
+        self.assertEqual([p["text"] for p in fake.to(ACME_HOOK)], ["Sundew tariff"])
+        self.assertEqual([p["text"] for p in fake.to(ACME_SENTINEL_HOOK)], ["Sentinel 8-K"])
+        self.assertEqual([p["text"] for p in fake.to(SUNDEW_HOOK)], ["Sundew tariff"])
+        self.assertEqual([p["text"] for p in fake.to(SENTINEL_HOOK)], ["Sentinel 8-K"])
+        self.assertEqual(len(fake.posts), 4)  # the customer is in no route
+
+    def test_client_route_mirrors_digests(self):
+        self._route_store("a@acme.example.com")
+        self._digest_store()
+        fake = _FakeSlack()
+        with mock.patch("urllib.request.urlopen", fake):
+            self.assertEqual(self.worker(self._route_env()).process_digests(
+                monitor="sundew", force=True), 1)
+        self.assertEqual([p["text"] for p in fake.to(ACME_HOOK)], ["Sundew digest — 2 items"])
+        self.assertEqual(len(fake.posts), 1)
+
+    def test_operator_deliveries_never_reach_a_client_webhook(self):
+        self._route_store("owner@example.com")
+        self._publish_both()
+        fake = _FakeSlack()
+        with mock.patch("urllib.request.urlopen", fake):
+            self.assertEqual(self.worker(self._route_env()).process_immediate(), 2)
+        self.assertEqual(sorted(post["url"] for post in fake.posts),
+                         sorted([SUNDEW_HOOK, SENTINEL_HOOK]))
+
+    def _fail_final_attempt(self, env):
+        self.publish("sundew", now=self.PAST)
+        self.store.conn.execute("UPDATE deliveries SET attempt_count=4")
+        self.store.conn.commit()
+        worker = self.worker(env)
+
+        def refuse(*args):
+            raise ConnectionRefusedError("a@acme.example.com refused")
+        worker._send = refuse
+        fake = _FakeSlack()
+        with mock.patch("urllib.request.urlopen", fake):
+            self.assertEqual(worker.process_immediate(), 0)
+        return fake
+
+    def test_ops_notices_never_reach_a_client_route(self):
+        self._route_store("a@acme.example.com")
+        fake = self._fail_final_attempt(self._route_env())
+        self.assertEqual([post["url"] for post in fake.posts], [SUNDEW_HOOK])
+        self.assertNotIn("example.com", json.dumps(fake.posts))
+
+        self._route_store("a@acme.example.com")
+        fake = self._fail_final_attempt(self._route_env(SLACK_OPS_WEBHOOK_URL=OPS_HOOK))
+        self.assertEqual([post["url"] for post in fake.posts], [OPS_HOOK])
+
+        # No default and no ops webhook: a client route alone gets no ops notice.
+        self._route_store("a@acme.example.com")
+        client_only = {"EMAIL_FROM": "sender@example.com",
+                       "SLACK_ROUTE_SUNDEW_ACME": f"a@acme.example.com|{ACME_HOOK}"}
+        self.assertEqual(self._fail_final_attempt(client_only).posts, [])
+
+    def test_address_in_two_routes_posts_to_both_once_each(self):
+        self._route_store("shared@example.com")
+        self.publish("sundew", now=self.PAST, subject_data={"subject": "Sundew tariff"})
+        env = dict(self.env,
+                   SLACK_ROUTE_SUNDEW_ACME=f"shared@example.com|{ACME_HOOK}",
+                   SLACK_ROUTE_SUNDEW_ACME2=f"shared@example.com|{ACME_HOOK}",
+                   SLACK_ROUTE_SUNDEW_GLOBEX=f"x@globex.example.com,shared@example.com|{GLOBEX_HOOK}")
+        fake = _FakeSlack()
+        with mock.patch("urllib.request.urlopen", fake):
+            self.assertEqual(self.worker(env).process_immediate(), 1)
+        self.assertEqual([post["url"] for post in fake.posts], [ACME_HOOK, GLOBEX_HOOK])
+
+    def test_malformed_route_is_skipped_and_its_url_is_never_printed(self):
+        self._route_store("a@acme.example.com")
+        self.publish("sundew", now=self.PAST)
+        env = dict(self.env,
+                   SLACK_ROUTE_SUNDEW_ACME=ACME_HOOK,  # missing "a@...|"
+                   SLACK_ROUTE_SUNDEW_GLOBEX="a@acme.example.com|https://evil.test/services/x",
+                   SLACK_ROUTE_ACME=f"a@acme.example.com|{ACME_HOOK}")  # no monitor
+        printed = []
+        fake = _FakeSlack()
+        with mock.patch("urllib.request.urlopen", fake), \
+                self.assertLogs("slack", "WARNING") as logs:
+            worker = DeliveryWorker(self.store, env, logger=printed.append)
+            worker._send = lambda *args: None
+            self.assertEqual(worker.process_immediate(), 1)
+        self.assertEqual(fake.posts, [])
+        output = "\n".join(logs.output + printed)
+        for variable in ("SLACK_ROUTE_SUNDEW_ACME", "SLACK_ROUTE_SUNDEW_GLOBEX",
+                         "SLACK_ROUTE_ACME"):
+            self.assertIn(variable, output)
+        self.assertNotIn("hooks.slack.com/services/T", output)
+        self.assertNotIn("evil.test", output)
 
 class DeliveryWorkerCliTests(unittest.TestCase):
     def test_test_slack_posts_to_the_monitor_channel(self):
