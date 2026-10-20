@@ -1,13 +1,22 @@
 """Slack incoming-webhook sender for the Sundew and Sentinel channels.
 
-Level 1 is operator-only: each monitor posts to one fixed webhook from env, and
-notifications are mirrored only for the operator's own addresses
-(``SLACK_MIRROR_EMAILS``). Email stays the system of record, so nothing here
-may raise into a delivery path: an unset webhook is a silent no-op and every
-failure is logged and swallowed.
+Each monitor has a list of routes, each one a set of recipient addresses and
+one webhook. A delivery is mirrored to every route of its monitor that lists
+the recipient, and to no other route:
 
-The webhook URL is a secret (anyone holding it can post to the channel), so it
-is never logged or put in exception text. Stdlib only.
+- ``default`` is the operator's own channel: ``SLACK_WEBHOOK_URL_<MONITOR>``
+  with the addresses in ``SLACK_MIRROR_EMAILS``.
+- ``SLACK_ROUTE_<MONITOR>_<NAME>=<email>[,<email>...]|<webhook URL>`` adds a
+  client route, e.g. ``SLACK_ROUTE_SUNDEW_ACME``.
+
+Ops notices go only to ``SLACK_OPS_WEBHOOK_URL``, or to the monitor's default
+webhook when that is unset, never to a client route.
+
+Email stays the system of record, so nothing here may raise into a delivery
+path: an unset webhook is a silent no-op and every failure is logged and
+swallowed. A webhook URL is a secret (anyone holding it can post to the
+channel), so it is never logged or put in exception text; warnings name the
+variable only. Stdlib only.
 """
 
 import json
@@ -15,6 +24,7 @@ import logging
 import os
 import urllib.error
 import urllib.request
+from collections import namedtuple
 
 HOOK_PREFIX = "https://hooks.slack.com/services/"
 SECTION_LIMIT = 3000  # Slack's per-section text limit
@@ -23,6 +33,12 @@ MONITOR_WEBHOOKS = {
     "sundew": "SLACK_WEBHOOK_URL_SUNDEW",
     "sentinel": "SLACK_WEBHOOK_URL_SENTINEL",
 }
+ROUTE_PREFIX = "SLACK_ROUTE_"
+OPS_WEBHOOK = "SLACK_OPS_WEBHOOK_URL"
+DEFAULT_ROUTE = "default"
+
+# One Slack destination: ``emails`` is a lower-cased frozenset of recipients.
+Route = namedtuple("Route", "name emails webhook")
 
 log = logging.getLogger("slack")
 
@@ -51,6 +67,79 @@ def mirror_allowed(recipient, env=None):
     raw = (os.environ if env is None else env).get("SLACK_MIRROR_EMAILS") or ""
     allowed = {addr.strip().lower() for addr in raw.split(",") if addr.strip()}
     return bool(recipient) and recipient.strip().lower() in allowed
+
+
+def _emails(raw):
+    return frozenset(addr.strip().lower() for addr in (raw or "").split(",") if addr.strip())
+
+
+def _route_prefix(monitor):
+    return f"{ROUTE_PREFIX}{monitor.upper()}_"
+
+
+def load_routes(env, monitor):
+    """The mirror routes for one monitor: ``default`` first (when its webhook
+    is set), then each valid ``SLACK_ROUTE_<MONITOR>_<NAME>`` sorted by name.
+    A route with no ``|``, no emails or a non-Slack URL is skipped with a
+    warning naming the variable. An empty value is skipped silently."""
+    env = os.environ if env is None else env
+    routes = []
+    default_hook = webhook_for(env, monitor)
+    if default_hook:
+        routes.append(Route(DEFAULT_ROUTE, _emails(env.get("SLACK_MIRROR_EMAILS")),
+                            default_hook))
+    prefix = _route_prefix(monitor)
+    for variable in sorted(key for key in env if key.startswith(prefix)):
+        name = variable[len(prefix):]
+        value = (env.get(variable) or "").strip()
+        if not value:
+            continue
+        raw_emails, bar, url = value.partition("|")
+        emails, url = _emails(raw_emails), url.strip()
+        if not name:
+            problem = "no route name"
+        elif not bar:
+            problem = "expected <email>[,<email>...]|<webhook URL>"
+        elif not emails:
+            problem = "no recipient emails"
+        elif not url.startswith(HOOK_PREFIX):
+            problem = f"not a {HOOK_PREFIX} URL"
+        else:
+            routes.append(Route(name, emails, url))
+            continue
+        log.warning("slack: ignoring %s: %s", variable, problem)
+    if default_hook:
+        for route in routes[1:]:
+            if route.emails & routes[0].emails:
+                log.warning("slack: SLACK_MIRROR_EMAILS and %s%s share an address; "
+                            "its deliveries post to both channels", prefix, route.name)
+    return routes
+
+
+def webhooks_for(routes, recipient):
+    """Webhooks of every route listing ``recipient`` (case-insensitive), in
+    route order with duplicates removed. Empty when none match."""
+    address = (recipient or "").strip().lower()
+    hooks = []
+    for route in routes:
+        if address and address in route.emails and route.webhook not in hooks:
+            hooks.append(route.webhook)
+    return hooks
+
+
+def ops_webhook(env, monitor):
+    """Where ops notices for ``monitor`` go: SLACK_OPS_WEBHOOK_URL, else the
+    monitor's default webhook. Never a client route. None when neither is set."""
+    return webhook_from_env(OPS_WEBHOOK, env) or webhook_for(env, monitor)
+
+
+def unknown_route_variables(env):
+    """``SLACK_ROUTE_*`` names that belong to no monitor (e.g. a missing
+    ``SUNDEW_``/``SENTINEL_``), so a typo is reported instead of ignored."""
+    env = os.environ if env is None else env
+    known = tuple(_route_prefix(monitor) for monitor in MONITOR_WEBHOOKS)
+    return sorted(key for key in env
+                  if key.startswith(ROUTE_PREFIX) and not key.startswith(known))
 
 
 def escape(text):

@@ -1020,6 +1020,10 @@ class _AlwaysUnavailable:
 # ---------------------------------------------------------------------------
 SUNDEW_HOOK = "https://hooks.slack.com/services/T000/B000/sundewsecret"
 SENTINEL_HOOK = "https://hooks.slack.com/services/T000/B001/sentinelsecret"
+ACME_HOOK = "https://hooks.slack.com/services/T111/B000/acmesecret"
+ACME_SENTINEL_HOOK = "https://hooks.slack.com/services/T111/B001/acmesentinelsecret"
+GLOBEX_HOOK = "https://hooks.slack.com/services/T222/B000/globexsecret"
+OPS_HOOK = "https://hooks.slack.com/services/T000/B009/opssecret"
 
 
 class _SlackReply:
@@ -1084,6 +1088,92 @@ class SlackSenderTests(unittest.TestCase):
         self.assertFalse(slack.mirror_allowed("customer@example.com", env))
         self.assertFalse(slack.mirror_allowed("", env))
         self.assertFalse(slack.mirror_allowed("owner@example.com", {}))
+
+    def test_load_routes_puts_default_first_then_clients_by_name(self):
+        env = {"SLACK_WEBHOOK_URL_SUNDEW": SUNDEW_HOOK,
+               "SLACK_MIRROR_EMAILS": "Owner@example.com",
+               "SLACK_ROUTE_SUNDEW_GLOBEX": f"ops@globex.example.com|{GLOBEX_HOOK}",
+               "SLACK_ROUTE_SUNDEW_ACME": f" A@Acme.example.com , b@acme.example.com, | {ACME_HOOK} ",
+               "SLACK_ROUTE_SENTINEL_ACME": f"a@acme.example.com|{ACME_SENTINEL_HOOK}"}
+        self.assertEqual(slack.load_routes(env, "sundew"), [
+            slack.Route("default", frozenset({"owner@example.com"}), SUNDEW_HOOK),
+            slack.Route("ACME", frozenset({"a@acme.example.com", "b@acme.example.com"}),
+                        ACME_HOOK),
+            slack.Route("GLOBEX", frozenset({"ops@globex.example.com"}), GLOBEX_HOOK)])
+        # Sentinel has no default webhook here; its only route is its own.
+        self.assertEqual(slack.load_routes(env, "sentinel"), [
+            slack.Route("ACME", frozenset({"a@acme.example.com"}), ACME_SENTINEL_HOOK)])
+        self.assertEqual(slack.load_routes({}, "sundew"), [])
+
+    def test_legacy_config_is_one_default_route(self):
+        env = {"SLACK_WEBHOOK_URL_SUNDEW": SUNDEW_HOOK,
+               "SLACK_WEBHOOK_URL_SENTINEL": SENTINEL_HOOK,
+               "SLACK_MIRROR_EMAILS": " Owner@Example.com , ops@example.com,"}
+        routes = slack.load_routes(env, "sundew")
+        self.assertEqual(routes, [slack.Route(
+            "default", frozenset({"owner@example.com", "ops@example.com"}), SUNDEW_HOOK)])
+        self.assertEqual(slack.webhooks_for(routes, "owner@example.COM"), [SUNDEW_HOOK])
+        self.assertEqual(slack.webhooks_for(routes, "customer@example.com"), [])
+        self.assertEqual(slack.webhooks_for(routes, ""), [])
+        self.assertEqual(slack.webhooks_for(routes, None), [])
+        # A default webhook with no mirror list mirrors nobody but still exists for ops.
+        no_list = {"SLACK_WEBHOOK_URL_SUNDEW": SUNDEW_HOOK}
+        self.assertEqual(slack.webhooks_for(slack.load_routes(no_list, "sundew"),
+                                            "owner@example.com"), [])
+        self.assertEqual(slack.ops_webhook(no_list, "sundew"), SUNDEW_HOOK)
+
+    def test_malformed_routes_are_skipped_and_never_logged(self):
+        bad = {
+            "SLACK_ROUTE_SUNDEW_NOBAR": ACME_HOOK,
+            "SLACK_ROUTE_SUNDEW_NOEMAIL": f" , |{ACME_HOOK}",
+            "SLACK_ROUTE_SUNDEW_BADURL": "a@acme.example.com|https://evil.test/services/x",
+            "SLACK_ROUTE_SUNDEW_HTTP": "a@acme.example.com|http://hooks.slack.com/services/T/B/x",
+            "SLACK_ROUTE_SUNDEW_": f"a@acme.example.com|{ACME_HOOK}",
+        }
+        env = dict(bad, SLACK_ROUTE_SUNDEW_EMPTY="",
+                   SLACK_ROUTE_SUNDEW_GOOD=f"a@acme.example.com|{GLOBEX_HOOK}")
+        with self.assertLogs("slack", "WARNING") as logs:
+            routes = slack.load_routes(env, "sundew")
+        self.assertEqual([route.name for route in routes], ["GOOD"])
+        self.assertEqual(len(logs.output), len(bad))
+        for variable in bad:
+            self.assertTrue(any(variable in line for line in logs.output), variable)
+        output = "\n".join(logs.output)
+        self.assertNotIn("hooks.slack.com/services/T", output)
+        self.assertNotIn("evil.test", output)
+        self.assertNotIn("acme.example.com", output)
+
+    def test_webhooks_for_matches_every_route_and_dedupes(self):
+        routes = [slack.Route("default", frozenset({"owner@example.com"}), SUNDEW_HOOK),
+                  slack.Route("ACME", frozenset({"a@acme.example.com", "shared@example.com"}),
+                              ACME_HOOK),
+                  slack.Route("ACME2", frozenset({"shared@example.com"}), ACME_HOOK),
+                  slack.Route("GLOBEX", frozenset({"shared@example.com"}), GLOBEX_HOOK)]
+        self.assertEqual(slack.webhooks_for(routes, "Shared@Example.com "),
+                         [ACME_HOOK, GLOBEX_HOOK])
+        self.assertEqual(slack.webhooks_for(routes, "a@acme.example.com"), [ACME_HOOK])
+        self.assertEqual(slack.webhooks_for(routes, "owner@example.com"), [SUNDEW_HOOK])
+
+    def test_ops_webhook_never_uses_a_client_route(self):
+        env = {"SLACK_ROUTE_SUNDEW_ACME": f"a@acme.example.com|{ACME_HOOK}"}
+        self.assertIsNone(slack.ops_webhook(env, "sundew"))
+        env["SLACK_WEBHOOK_URL_SUNDEW"] = SUNDEW_HOOK
+        self.assertEqual(slack.ops_webhook(env, "sundew"), SUNDEW_HOOK)
+        env["SLACK_OPS_WEBHOOK_URL"] = OPS_HOOK
+        self.assertEqual(slack.ops_webhook(env, "sundew"), OPS_HOOK)
+        self.assertEqual(slack.ops_webhook(env, "sentinel"), OPS_HOOK)
+
+    def test_overlapping_and_unknown_routes_are_reported_by_name(self):
+        env = {"SLACK_WEBHOOK_URL_SUNDEW": SUNDEW_HOOK,
+               "SLACK_MIRROR_EMAILS": "owner@example.com,a@acme.example.com",
+               "SLACK_ROUTE_SUNDEW_ACME": f"a@acme.example.com|{ACME_HOOK}",
+               "SLACK_ROUTE_ACME": f"a@acme.example.com|{ACME_HOOK}"}
+        with self.assertLogs("slack", "WARNING") as logs:
+            slack.load_routes(env, "sundew")
+        self.assertEqual(len(logs.output), 1)
+        self.assertIn("SLACK_ROUTE_SUNDEW_ACME", logs.output[0])
+        self.assertNotIn("example.com", logs.output[0])
+        self.assertEqual(slack.unknown_route_variables(env), ["SLACK_ROUTE_ACME"])
 
     def test_unset_webhook_makes_no_request(self):
         fake = _FakeSlack()
