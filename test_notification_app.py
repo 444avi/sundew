@@ -1522,5 +1522,66 @@ class DeliveryWorkerCliTests(unittest.TestCase):
                 ["--test-slack", "sundew", "--env", os.devnull]), 2)
 
 
+    def _test_slack(self, args, env, fake=None):
+        import delivery_worker
+        fake = fake or _FakeSlack()
+        with mock.patch.dict(os.environ, env), \
+                mock.patch("urllib.request.urlopen", fake), \
+                mock.patch("delivery_worker.log") as log:
+            code = delivery_worker.main(args + ["--env", os.devnull])
+        return code, fake, [call.args[0] for call in log.call_args_list]
+
+    ROUTES = {"SLACK_WEBHOOK_URL_SUNDEW": SUNDEW_HOOK,
+              "SLACK_ROUTE_SUNDEW_ACME": f"a@acme.example.com|{ACME_HOOK}",
+              "SLACK_ROUTE_SUNDEW_GLOBEX": f"x@globex.example.com|{GLOBEX_HOOK}",
+              "SLACK_ROUTE_SENTINEL_ACME": f"a@acme.example.com|{ACME_SENTINEL_HOOK}"}
+
+    def test_test_slack_posts_to_default_and_every_client_route(self):
+        code, fake, lines = self._test_slack(["--test-slack", "sundew"], self.ROUTES)
+        self.assertEqual(code, 0)
+        self.assertEqual([post["url"] for post in fake.posts],
+                         [SUNDEW_HOOK, ACME_HOOK, GLOBEX_HOOK])
+        self.assertEqual(lines, ["slack test sundew default: accepted",
+                                 "slack test sundew ACME: accepted",
+                                 "slack test sundew GLOBEX: accepted"])
+        for post in fake.posts:
+            self.assertEqual(list(post["payload"]), ["text"])  # contentless: no blocks
+            self.assertTrue(post["payload"]["text"].startswith("[TEST] Sundew"))
+
+    def test_test_slack_route_posts_only_to_that_route(self):
+        code, fake, lines = self._test_slack(
+            ["--test-slack", "sundew", "--route", "acme"], self.ROUTES)
+        self.assertEqual(code, 0)
+        self.assertEqual([post["url"] for post in fake.posts], [ACME_HOOK])
+        self.assertEqual(lines, ["slack test sundew ACME: accepted"])
+        self.assertEqual(fake.posts[0]["payload"]["text"],
+                         "[TEST] Sundew Slack test (ACME). No real event occurred.")
+        code, fake, lines = self._test_slack(
+            ["--test-slack", "sentinel", "--route", "ACME"], self.ROUTES)
+        self.assertEqual([post["url"] for post in fake.posts], [ACME_SENTINEL_HOOK])
+        code, fake, lines = self._test_slack(
+            ["--test-slack", "sundew", "--route", "INITECH"], self.ROUTES)
+        self.assertEqual((code, fake.posts), (2, []))
+        self.assertIn("SLACK_ROUTE_SUNDEW_INITECH", lines[0])
+        with self.assertRaises(SystemExit), mock.patch("sys.stderr", io.StringIO()):
+            self._test_slack(["--route", "ACME"], self.ROUTES)
+
+    def test_test_slack_includes_a_separate_ops_webhook(self):
+        env = {"SLACK_WEBHOOK_URL_SENTINEL": SENTINEL_HOOK, "SLACK_OPS_WEBHOOK_URL": OPS_HOOK}
+        code, fake, lines = self._test_slack(["--test-slack", "sentinel"], env)
+        self.assertEqual(code, 0)
+        self.assertEqual([post["url"] for post in fake.posts], [SENTINEL_HOOK, OPS_HOOK])
+        self.assertEqual(lines, ["slack test sentinel default: accepted",
+                                 "slack test sentinel ops: accepted"])
+
+    def test_test_slack_reports_rejections_without_the_url(self):
+        with self.assertLogs("slack", "WARNING") as logs:
+            code, fake, lines = self._test_slack(
+                ["--test-slack", "sundew"], self.ROUTES, _FakeSlack(ConnectionResetError()))
+        self.assertEqual(code, 1)
+        self.assertEqual(len(lines), 3)
+        self.assertTrue(all(line.endswith("rejected (see warning above)") for line in lines))
+        self.assertNotIn("hooks.slack.com/services/T", "\n".join(lines + logs.output))
+
 if __name__ == "__main__":
     unittest.main()

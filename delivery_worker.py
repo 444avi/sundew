@@ -10,7 +10,7 @@ import time
 import sentinel_config as sentinel_cfg
 import slack
 import sundew
-from notification_app import AppStore, DeliveryWorker, static_preview
+from notification_app import AppStore, DeliveryWorker
 
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -21,27 +21,50 @@ def log(message):
     print(f"[delivery] {message}", flush=True)
 
 
-def test_slack(env, monitor):
-    """Post a labeled test message to one monitor's channel."""
-    variable = slack.MONITOR_WEBHOOKS[monitor]
-    hook = slack.webhook_for(env, monitor)
-    if not hook:
-        log(f"ERROR: {variable} is unset or not a {slack.HOOK_PREFIX} URL")
+def slack_test_destinations(env, monitor, route=None):
+    """(name, webhook) pairs for --test-slack: the default webhook, the ops
+    webhook when it is set apart from the default, then every client route; or
+    only the client route ``route``. Each webhook appears once."""
+    clients = [r for r in slack.load_routes(env, monitor) if r.name != slack.DEFAULT_ROUTE]
+    if route:
+        pairs = [(r.name, r.webhook) for r in clients if r.name.upper() == route.upper()]
+    else:
+        pairs = [(slack.DEFAULT_ROUTE, slack.webhook_for(env, monitor)),
+                 ("ops", slack.ops_webhook(env, monitor))]
+        pairs += [(r.name, r.webhook) for r in clients]
+    destinations, seen = [], set()
+    for name, hook in pairs:
+        if hook and hook not in seen:
+            seen.add(hook)
+            destinations.append((name, hook))
+    return destinations
+
+
+def test_slack(env, monitor, route=None):
+    """Post a contentless labeled test to each of one monitor's Slack
+    destinations. Prints one line per destination, never the URL."""
+    destinations = slack_test_destinations(env, monitor, route)
+    if not destinations:
+        if route:
+            prefix = f"{slack.ROUTE_PREFIX}{monitor.upper()}_"
+            log(f"ERROR: {prefix}{route.upper()} is unset or invalid (see warning above)")
+        else:
+            log(f"ERROR: no Slack destination for {monitor}: set "
+                f"{slack.MONITOR_WEBHOOKS[monitor]}, {slack.OPS_WEBHOOK} or a "
+                f"{slack.ROUTE_PREFIX}{monitor.upper()}_<NAME> route "
+                f"({slack.HOOK_PREFIX} URLs only)")
         return 2
-    preview = static_preview(monitor)
-    title = "[TEST] " + preview["subject"]
-    body = "\n".join([
-        preview["eyebrow"], "",
-        preview["headline"], "",
-        preview["summary"], "",
-        f"Slack test from delivery_worker.py on {socket.gethostname()}. "
-        "No real event occurred.",
-    ])
-    if slack.post(hook, title, slack.plain_block(title, body)):
-        log(f"slack test accepted for {monitor}")
-        return 0
-    log(f"ERROR: slack test rejected for {monitor} (see warning above)")
-    return 1
+    failed = 0
+    for name, hook in destinations:
+        text = f"[TEST] {monitor.title()} Slack test ({name}). No real event occurred."
+        if name in ("ops", slack.DEFAULT_ROUTE):
+            text += f" Sent by delivery_worker.py on {socket.gethostname()}."
+        if slack.post(hook, text):
+            log(f"slack test {monitor} {name}: accepted")
+        else:
+            failed += 1
+            log(f"ERROR: slack test {monitor} {name}: rejected (see warning above)")
+    return 1 if failed else 0
 
 
 def main(argv=None):
@@ -57,13 +80,17 @@ def main(argv=None):
     parser.add_argument("--app-db", default=DEFAULT_APP_DB)
     parser.add_argument("--env", default=os.path.join(HERE, ".env"))
     parser.add_argument("--test-slack", choices=("sundew", "sentinel"),
-                        help="post a test message to that monitor's Slack channel and exit")
+                        help="post a test message to that monitor's Slack channels and exit")
+    parser.add_argument("--route", metavar="NAME",
+                        help="with --test-slack, post only to SLACK_ROUTE_<MONITOR>_<NAME>")
     args = parser.parse_args(argv)
+    if args.route and not args.test_slack:
+        parser.error("--route needs --test-slack")
 
     sundew.load_env(args.env)
     env = dict(os.environ)
     if args.test_slack:
-        return test_slack(env, args.test_slack)
+        return test_slack(env, args.test_slack, args.route)
     missing = [key for key in ("EMAIL_FROM",) if not env.get(key)]
     if missing:
         log(f"ERROR: missing {', '.join(missing)}")
