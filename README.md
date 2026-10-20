@@ -67,7 +67,8 @@ cp .env.example .env      # then fill in your keys (see below)
 - `EMAIL_FROM`, `SMTP_PASSWORD` (+ optional `SMTP_HOST`, `SMTP_PORT`,
   `SMTP_USER`) — required unless you run `--no-email`. Defaults target Gmail; for
   Gmail use a **16-char App Password**, not your account password.
-- `SLACK_WEBHOOK_URL_SUNDEW`, `SLACK_WEBHOOK_URL_SENTINEL`, `SLACK_MIRROR_EMAILS`
+- `SLACK_WEBHOOK_URL_SUNDEW`, `SLACK_WEBHOOK_URL_SENTINEL`, `SLACK_MIRROR_EMAILS`,
+  `SLACK_OPS_WEBHOOK_URL`, `SLACK_ROUTE_SUNDEW_<NAME>`, `SLACK_ROUTE_SENTINEL_<NAME>`
   — optional Slack channel posts from `delivery_worker.py` (see
   [Slack](#slack)). Unset ⇒ no Slack traffic.
 - **Legacy recipient lists** (each may be a comma-separated list of addresses):
@@ -166,17 +167,54 @@ channels through one incoming webhook each (`SLACK_WEBHOOK_URL_SUNDEW`,
 - **Mirrors** — a copy of an immediate notification (same text, Kalshi section
   included, no manage/unsubscribe links) or a one-line-per-item digest summary,
   **only** when the recipient is listed in `SLACK_MIRROR_EMAILS` (the operator's
-  own addresses; unset mirrors nothing).
+  own addresses; unset mirrors nothing) or in a client route (see
+  [Client channels](#client-channels)).
 - **Ops notices** — a delivery that failed its final (5th) attempt, e.g.
   `Sentinel: delivery failed for event 1234 after 5 attempts (SMTPException)`.
   Ids and exception type names only; at most one per monitor and kind every 30
   minutes.
 
+Set `SLACK_OPS_WEBHOOK_URL` to send ops notices for both monitors to their own
+channel instead of the monitor's webhook.
+
+### Client channels
+
+A client can get its own users' Sundew and/or Sentinel notifications in its own
+Slack workspace. Add one line per client per monitor to the `--env` file
+(`/etc/sundew/env` in production) and restart `delivery.service`:
+
+```
+SLACK_ROUTE_SUNDEW_ACME=alice@acme.example.com,bob@acme.example.com|https://hooks.slack.com/services/...
+SLACK_ROUTE_SENTINEL_ACME=alice@acme.example.com|https://hooks.slack.com/services/...
+```
+
+The monitor comes first, then a route name of your choosing (`ACME`). The value
+is the client's recipient addresses (comma-separated, case-insensitive), a `|`,
+and an incoming-webhook URL from the client's workspace. The operator's own
+webhook plus `SLACK_MIRROR_EMAILS` act as the `default` route.
+
+- A delivery is mirrored to every route for its monitor that lists the
+  recipient (each webhook once), and to no other route. A Sentinel route never
+  gets Sundew posts.
+- Ops notices never go to a client route, even when the failed delivery was to
+  that client's address. They go to `SLACK_OPS_WEBHOOK_URL`, or the monitor's
+  default webhook.
+- Keep a client's addresses out of `SLACK_MIRROR_EMAILS` (and the operator's
+  out of client routes), or those notifications post to both channels; the
+  worker logs a warning naming the route when the lists overlap.
+- A route with no `|`, no addresses or a URL that isn't
+  `https://hooks.slack.com/services/` is skipped with a warning naming the
+  variable. A `SLACK_ROUTE_*` name without `SUNDEW_`/`SENTINEL_` is reported
+  and ignored.
+
 Email stays the system of record: a Slack post happens only after the delivery
 is recorded `sent`, a Slack failure is logged and swallowed, and a retried email
 never posts twice. Only `https://hooks.slack.com/services/` URLs are accepted,
 and the URL is never logged. Check a deploy with
-`python3 delivery_worker.py --test-slack sundew` (or `sentinel`).
+`python3 delivery_worker.py --test-slack sundew` (or `sentinel`): it posts a
+labeled test to the default webhook, a separate ops webhook if set, and every
+client route for that monitor, printing one accepted/rejected line per route
+name. Add `--route ACME` to post to one client route only.
 
 ## Kalshi email content
 
@@ -337,6 +375,7 @@ python3 sentinel.py --digest-now         # send the pending digest now
 python3 delivery_worker.py --once        # process currently due work once
 python3 delivery_worker.py --force-digests  # flush all non-empty due/future groups
 python3 delivery_worker.py --test-slack sundew  # post a test message to #sundew
+python3 delivery_worker.py --test-slack sundew --route ACME  # ...to one client route only
 ```
 
 These are safe because both databases dedup: anything the service already
